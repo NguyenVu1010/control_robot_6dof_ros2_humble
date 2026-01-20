@@ -1,1 +1,0 @@
-rclcpp;rclcpp_lifecycle;pluginlib;controller_interface;hardware_interface;geometry_msgs;kdl_parser;orocos_kdl_vendor;orocos_kdl;realtime_tools;libeigen-dev;xacro;controller_manager;joint_trajectory_controller;ament_lint_auto;ament_lint_common
