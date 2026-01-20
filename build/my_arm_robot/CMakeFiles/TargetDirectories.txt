@@ -1,0 +1,9 @@
+/home/nguyen1/workspace/tu_thanh_17_1/build/my_arm_robot/CMakeFiles/uninstall.dir
+/home/nguyen1/workspace/tu_thanh_17_1/build/my_arm_robot/CMakeFiles/my_arm_robot_uninstall.dir
+/home/nguyen1/workspace/tu_thanh_17_1/build/my_arm_robot/CMakeFiles/test.dir
+/home/nguyen1/workspace/tu_thanh_17_1/build/my_arm_robot/CMakeFiles/edit_cache.dir
+/home/nguyen1/workspace/tu_thanh_17_1/build/my_arm_robot/CMakeFiles/rebuild_cache.dir
+/home/nguyen1/workspace/tu_thanh_17_1/build/my_arm_robot/CMakeFiles/list_install_components.dir
+/home/nguyen1/workspace/tu_thanh_17_1/build/my_arm_robot/CMakeFiles/install.dir
+/home/nguyen1/workspace/tu_thanh_17_1/build/my_arm_robot/CMakeFiles/install/local.dir
+/home/nguyen1/workspace/tu_thanh_17_1/build/my_arm_robot/CMakeFiles/install/strip.dir

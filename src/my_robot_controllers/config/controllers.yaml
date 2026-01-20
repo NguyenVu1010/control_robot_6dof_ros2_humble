@@ -1,0 +1,51 @@
+controller_manager:
+  ros__parameters:
+    update_rate: 100  # Tần số cập nhật (Hz)
+
+    # 1. Broadcaster: Đọc trạng thái khớp (Position/Velocity) để hiển thị lên RViz
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    # 2. Arm Controller: Bộ điều khiển tự viết (Inverse Kinematics -> Velocity)
+    my_cartesian_controller:
+      type: my_robot_controllers/CartesianVelocityController
+
+    # 3. Gripper Controller: Điều khiển vị trí đơn giản
+    gripper_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+
+# --- CẤU HÌNH CHI TIẾT ---
+
+my_cartesian_controller:
+  ros__parameters:
+    # Danh sách khớp cánh tay (Phải khớp 100% với URDF)
+    joints:
+      - Link_1_joint
+      - Link_2_joint
+      - Link_3_joint
+      - Link_4_joint
+      - Link_5_joint
+      - Link_6_joint
+    
+    # Khâu gốc và khâu cuối để tính toán động học
+    base_link: "base_link"
+    end_effector_link: "Link_6" 
+
+gripper_controller:
+  ros__parameters:
+    # 1. Khai báo khớp
+    joints:
+      - gripper_motor_joint
+    
+    command_interfaces:
+      - position
+    
+    state_interfaces:
+      - position
+      - velocity
+      
+    # 3. Cấu hình phụ trợ cho Mock Hardware
+    # open_loop_control = true giúp controller không yêu cầu PID gains, 
+    # rất quan trọng khi chạy mô phỏng (Mock) để tránh lỗi "Gains not found"
+    open_loop_control: true
+    allow_partial_joints_goal: true

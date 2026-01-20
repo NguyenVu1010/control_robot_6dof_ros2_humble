@@ -1,0 +1,22 @@
+# colcon
+build/
+install/
+log/
+
+# ROS
+*.bag
+*.bag.active
+*.db3
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store

@@ -1,0 +1,46 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>my_robot_controllers</name>
+  <version>0.0.1</version>
+  <description>Real-time Cartesian Velocity Controller using KDL and Eigen</description>
+  <maintainer email="user@todo.todo">user</maintainer>
+  <license>TODO: License declaration</license>
+
+  <!-- Công cụ build -->
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <!-- Các thư viện cốt lõi của ROS 2 -->
+  <depend>rclcpp</depend>
+  <depend>rclcpp_lifecycle</depend>
+  <depend>pluginlib</depend>
+
+  <!-- Giao diện Controller và Hardware -->
+  <depend>controller_interface</depend>
+  <depend>hardware_interface</depend>
+  <depend>geometry_msgs</depend>
+
+  <!-- Thư viện Động học KDL -->
+  <depend>kdl_parser</depend>       <!-- Để đọc URDF thành KDL Chain -->
+  <depend>orocos_kdl_vendor</depend> <!-- Gói vendor của ROS -->
+  <depend>orocos_kdl</depend>        <!-- Thư viện C++ gốc (cần thiết để link) -->
+
+  <!-- Thư viện Toán học & Tối ưu Real-time -->
+  <depend>realtime_tools</depend>    <!-- Để dùng RealtimeBuffer (quan trọng) -->
+  <depend>libeigen-dev</depend>      <!-- Thư viện toán ma trận Eigen3 -->
+
+  <!-- Dependencies chỉ cần khi chạy (Runtime) -->
+  <exec_depend>xacro</exec_depend>
+  <exec_depend>controller_manager</exec_depend>
+  <exec_depend>joint_trajectory_controller</exec_depend>
+  <!-- (Tùy chọn) Nếu bạn muốn dependency chặt chẽ tới package robot của bạn -->
+  <!-- <exec_depend>robot</exec_depend> -->
+
+  <!-- Dependencies cho Testing -->
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

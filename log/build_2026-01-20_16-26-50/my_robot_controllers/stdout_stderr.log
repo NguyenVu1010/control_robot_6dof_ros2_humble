@@ -1,0 +1,84 @@
+-- The C compiler identification is GNU 11.4.0
+-- The CXX compiler identification is GNU 11.4.0
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /usr/bin/cc - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/c++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Found ament_cmake: 1.3.12 (/opt/ros/humble/share/ament_cmake/cmake)
+-- Found Python3: /usr/bin/python3 (found version "3.10.12") found components: Interpreter 
+-- Found rclcpp: 16.0.16 (/opt/ros/humble/share/rclcpp/cmake)
+-- Found rosidl_generator_c: 3.1.7 (/opt/ros/humble/share/rosidl_generator_c/cmake)
+-- Found rosidl_adapter: 3.1.7 (/opt/ros/humble/share/rosidl_adapter/cmake)
+-- Found rosidl_generator_cpp: 3.1.7 (/opt/ros/humble/share/rosidl_generator_cpp/cmake)
+-- Using all available rosidl_typesupport_c: rosidl_typesupport_fastrtps_c;rosidl_typesupport_introspection_c
+-- Using all available rosidl_typesupport_cpp: rosidl_typesupport_fastrtps_cpp;rosidl_typesupport_introspection_cpp
+-- Found rmw_implementation_cmake: 6.1.2 (/opt/ros/humble/share/rmw_implementation_cmake/cmake)
+-- Found rmw_fastrtps_cpp: 6.2.9 (/opt/ros/humble/share/rmw_fastrtps_cpp/cmake)
+-- Found OpenSSL: /usr/lib/x86_64-linux-gnu/libcrypto.so (found version "3.0.2")  
+-- Found FastRTPS: /opt/ros/humble/include  
+-- Using RMW implementation 'rmw_fastrtps_cpp' as default
+-- Looking for pthread.h
+-- Looking for pthread.h - found
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Success
+-- Found Threads: TRUE  
+-- Found pluginlib: 5.1.2 (/opt/ros/humble/share/pluginlib/cmake)
+-- Found controller_interface: 2.52.2 (/opt/ros/humble/share/controller_interface/cmake)
+-- Found kdl_parser: 2.6.4 (/opt/ros/humble/share/kdl_parser/cmake)
+-- Found eigen3_cmake_module: 0.1.1 (/opt/ros/humble/share/eigen3_cmake_module/cmake)
+-- Found Eigen3: TRUE (found version "3.4.0") 
+-- Ensuring Eigen3 include directory is part of orocos-kdl CMake target
+-- Found realtime_tools: 2.14.1 (/opt/ros/humble/share/realtime_tools/cmake)
+-- Configuring done
+-- Generating done
+-- Build files have been written to: /home/nguyen1/workspace/tu_thanh_17_1/build/my_robot_controllers
+[ 83%] [32mBuilding CXX object CMakeFiles/cartesian_velocity_controller.dir/src/algo/fk_solver.cpp.o[0m
+[ 83%] [32mBuilding CXX object CMakeFiles/cartesian_velocity_controller.dir/src/algo/robot_kinematics.cpp.o[0m
+[ 83%] [32mBuilding CXX object CMakeFiles/cartesian_velocity_controller.dir/src/algo/math_utils.cpp.o[0m
+[ 83%] [32mBuilding CXX object CMakeFiles/cartesian_velocity_controller.dir/src/cartesian_velocity_controller.cpp.o[0m
+[ 83%] [32mBuilding CXX object CMakeFiles/cartesian_velocity_controller.dir/src/algo/jacobian_solver.cpp.o[0m
+[100%] [32m[1mLinking CXX shared library libcartesian_velocity_controller.so[0m
+[100%] Built target cartesian_velocity_controller
+-- Install configuration: ""
+-- Installing: /home/nguyen1/workspace/tu_thanh_17_1/install/my_robot_controllers/share/my_robot_controllers/my_robot_controllers_plugins.xml
+-- Installing: /home/nguyen1/workspace/tu_thanh_17_1/install/my_robot_controllers/lib/libcartesian_velocity_controller.so
+-- Set runtime path of "/home/nguyen1/workspace/tu_thanh_17_1/install/my_robot_controllers/lib/libcartesian_velocity_controller.so" to ""
+-- Up-to-date: /home/nguyen1/workspace/tu_thanh_17_1/install/my_robot_controllers/share/my_robot_controllers/my_robot_controllers_plugins.xml
+-- Installing: /home/nguyen1/workspace/tu_thanh_17_1/install/my_robot_controllers/include
+-- Installing: /home/nguyen1/workspace/tu_thanh_17_1/install/my_robot_controllers/include/my_robot_controllers
+-- Installing: /home/nguyen1/workspace/tu_thanh_17_1/install/my_robot_controllers/include/my_robot_controllers/cartesian_velocity_controller.hpp
+-- Installing: /home/nguyen1/workspace/tu_thanh_17_1/install/my_robot_controllers/include/my_robot_controllers/algo
+-- Installing: /home/nguyen1/workspace/tu_thanh_17_1/install/my_robot_controllers/include/my_robot_controllers/algo/math_utils.hpp
+-- Installing: /home/nguyen1/workspace/tu_thanh_17_1/install/my_robot_controllers/include/my_robot_controllers/algo/jacobian_solver.hpp
+-- Installing: /home/nguyen1/workspace/tu_thanh_17_1/install/my_robot_controllers/include/my_robot_controllers/algo/fk_solver.hpp
+-- Installing: /home/nguyen1/workspace/tu_thanh_17_1/install/my_robot_controllers/include/my_robot_controllers/algo/types.hpp
+-- Installing: /home/nguyen1/workspace/tu_thanh_17_1/install/my_robot_controllers/include/my_robot_controllers/algo/robot_kinematics.hpp
+-- Installing: /home/nguyen1/workspace/tu_thanh_17_1/install/my_robot_controllers/share/my_robot_controllers/config
+-- Installing: /home/nguyen1/workspace/tu_thanh_17_1/install/my_robot_controllers/share/my_robot_controllers/config/controllers.yaml
+-- Installing: /home/nguyen1/workspace/tu_thanh_17_1/install/my_robot_controllers/share/my_robot_controllers/environment/library_path.sh
+-- Installing: /home/nguyen1/workspace/tu_thanh_17_1/install/my_robot_controllers/share/my_robot_controllers/environment/library_path.dsv
+-- Installing: /home/nguyen1/workspace/tu_thanh_17_1/install/my_robot_controllers/share/ament_index/resource_index/package_run_dependencies/my_robot_controllers
+-- Installing: /home/nguyen1/workspace/tu_thanh_17_1/install/my_robot_controllers/share/ament_index/resource_index/parent_prefix_path/my_robot_controllers
+-- Installing: /home/nguyen1/workspace/tu_thanh_17_1/install/my_robot_controllers/share/my_robot_controllers/environment/ament_prefix_path.sh
+-- Installing: /home/nguyen1/workspace/tu_thanh_17_1/install/my_robot_controllers/share/my_robot_controllers/environment/ament_prefix_path.dsv
+-- Installing: /home/nguyen1/workspace/tu_thanh_17_1/install/my_robot_controllers/share/my_robot_controllers/environment/path.sh
+-- Installing: /home/nguyen1/workspace/tu_thanh_17_1/install/my_robot_controllers/share/my_robot_controllers/environment/path.dsv
+-- Installing: /home/nguyen1/workspace/tu_thanh_17_1/install/my_robot_controllers/share/my_robot_controllers/local_setup.bash
+-- Installing: /home/nguyen1/workspace/tu_thanh_17_1/install/my_robot_controllers/share/my_robot_controllers/local_setup.sh
+-- Installing: /home/nguyen1/workspace/tu_thanh_17_1/install/my_robot_controllers/share/my_robot_controllers/local_setup.zsh
+-- Installing: /home/nguyen1/workspace/tu_thanh_17_1/install/my_robot_controllers/share/my_robot_controllers/local_setup.dsv
+-- Installing: /home/nguyen1/workspace/tu_thanh_17_1/install/my_robot_controllers/share/my_robot_controllers/package.dsv
+-- Installing: /home/nguyen1/workspace/tu_thanh_17_1/install/my_robot_controllers/share/ament_index/resource_index/packages/my_robot_controllers
+-- Installing: /home/nguyen1/workspace/tu_thanh_17_1/install/my_robot_controllers/share/ament_index/resource_index/controller_interface__pluginlib__plugin/my_robot_controllers
+-- Installing: /home/nguyen1/workspace/tu_thanh_17_1/install/my_robot_controllers/share/my_robot_controllers/cmake/ament_cmake_export_include_directories-extras.cmake
+-- Installing: /home/nguyen1/workspace/tu_thanh_17_1/install/my_robot_controllers/share/my_robot_controllers/cmake/ament_cmake_export_libraries-extras.cmake
+-- Installing: /home/nguyen1/workspace/tu_thanh_17_1/install/my_robot_controllers/share/my_robot_controllers/cmake/ament_cmake_export_dependencies-extras.cmake
+-- Installing: /home/nguyen1/workspace/tu_thanh_17_1/install/my_robot_controllers/share/my_robot_controllers/cmake/my_robot_controllersConfig.cmake
+-- Installing: /home/nguyen1/workspace/tu_thanh_17_1/install/my_robot_controllers/share/my_robot_controllers/cmake/my_robot_controllersConfig-version.cmake
+-- Installing: /home/nguyen1/workspace/tu_thanh_17_1/install/my_robot_controllers/share/my_robot_controllers/package.xml
