@@ -23,6 +23,7 @@ add_library(cartesian_velocity_controller SHARED
   src/algo/jacobian_solver.cpp
   src/algo/math_utils.cpp
   src/algo/robot_kinematics.cpp
+  src/shm/shm_manager.cpp
 )
 
 target_include_directories(cartesian_velocity_controller PUBLIC

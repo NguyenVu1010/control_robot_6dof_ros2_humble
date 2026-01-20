@@ -1,6 +1,6 @@
 controller_manager:
   ros__parameters:
-    update_rate: 100  # Tần số cập nhật (Hz)
+    update_rate: 500  # Tần số cập nhật (Hz)
 
     # 1. Broadcaster: Đọc trạng thái khớp (Position/Velocity) để hiển thị lên RViz
     joint_state_broadcaster:

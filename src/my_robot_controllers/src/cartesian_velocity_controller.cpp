@@ -1,8 +1,7 @@
 #include "my_robot_controllers/cartesian_velocity_controller.hpp"
-
 #include "kdl_parser/kdl_parser.hpp"
 #include "pluginlib/class_list_macros.hpp"
-#include <kdl/chain.hpp> // Cần include để dùng KDL::Chain cục bộ
+#include <kdl/chain.hpp> 
 
 namespace my_robot_controllers
 {
@@ -35,63 +34,54 @@ controller_interface::CallbackReturn CartesianVelocityController::on_configure(
   std::string robot_desc = get_node()->get_parameter("robot_description").as_string();
 
   if (joint_names_.empty() || robot_desc.empty()) {
-    RCLCPP_ERROR(get_node()->get_logger(), "Parameters empty (joints or robot_description)");
+    RCLCPP_ERROR(get_node()->get_logger(), "Parameters empty");
     return controller_interface::CallbackReturn::ERROR;
   }
 
-  // 2. Parse URDF to KDL Tree
+  // 2. Parse KDL
   KDL::Tree kdl_tree;
   if (!kdl_parser::treeFromString(robot_desc, kdl_tree)) {
     RCLCPP_ERROR(get_node()->get_logger(), "Failed to parse URDF");
     return controller_interface::CallbackReturn::ERROR;
   }
   
-  // 3. Validate Chain (Local check)
-  // Khai báo biến cục bộ để kiểm tra tính hợp lệ của chuỗi động học
-  KDL::Chain kdl_chain; 
+  // Validation Chain
+  KDL::Chain kdl_chain;
   if (!kdl_tree.getChain(base_link_, end_effector_link_, kdl_chain)) {
-    RCLCPP_ERROR(get_node()->get_logger(), "Failed to get KDL chain from %s to %s", 
-                 base_link_.c_str(), end_effector_link_.c_str());
+    RCLCPP_ERROR(get_node()->get_logger(), "Failed to get chain");
     return controller_interface::CallbackReturn::ERROR;
   }
 
-  auto chain_joints = kdl_chain.getNrOfJoints();
-  auto yaml_joints = joint_names_.size();
-
-  RCLCPP_INFO(get_node()->get_logger(), "--- KDL CHAIN CHECK ---");
-  RCLCPP_INFO(get_node()->get_logger(), "Base Link: %s", base_link_.c_str());
-  RCLCPP_INFO(get_node()->get_logger(), "End Link : %s", end_effector_link_.c_str());
-  RCLCPP_INFO(get_node()->get_logger(), "Joints in URDF Chain: %d", chain_joints);
-  RCLCPP_INFO(get_node()->get_logger(), "Joints in YAML Config: %ld", yaml_joints);
-
-  if (chain_joints != yaml_joints) {
-      RCLCPP_ERROR(get_node()->get_logger(), 
-          "FATAL ERROR: Mismatch! URDF has %d joints but YAML has %ld joints.", 
-          chain_joints, yaml_joints);
-      RCLCPP_ERROR(get_node()->get_logger(), "Please check 'base_link' and 'end_effector_link' names.");
+  // Check Joints count
+  if (kdl_chain.getNrOfJoints() != joint_names_.size()) {
+      RCLCPP_ERROR(get_node()->get_logger(), "Mismatch joints count!");
       return controller_interface::CallbackReturn::ERROR;
   }
 
-  // 4. Init Algo Module
-  // Truyền Tree vào để Module tự tạo Chain nội bộ (Tránh lỗi bộ nhớ/ABI conflict)
+  // 3. Init Algo Modules
+  // Inverse Kinematics
   kinematics_solver_ = std::make_shared<algo::RobotKinematics>(
       kdl_tree, base_link_, end_effector_link_);
-  
-  // 5. Resize Variables
-  // Lấy số khớp chính xác từ module
-  auto n_joints = kinematics_solver_->getNrOfJoints();
-  
-  if (n_joints != joint_names_.size()) {
-      RCLCPP_ERROR(get_node()->get_logger(), "Mismatch joints after init! KDL: %d, YAML: %ld", n_joints, joint_names_.size());
+      
+  // Forward Kinematics (Để tính tọa độ gửi ra SHM)
+  fk_solver_ = std::make_shared<algo::FkSolver>(
+      kdl_tree, base_link_, end_effector_link_);
+
+  // 4. Init Shared Memory (Server Mode = true)
+  shm_manager_ = std::make_shared<shm::ShmManager>(shm::ROBOT_SHM_NAME, true);
+  if (!shm_manager_->init()) {
+      RCLCPP_ERROR(get_node()->get_logger(), "Failed to init Shared Memory!");
       return controller_interface::CallbackReturn::ERROR;
   }
 
+  // 5. Resize Variables
+  auto n_joints = kinematics_solver_->getNrOfJoints();
   q_current_.resize(n_joints);
   q_dot_cmd_.resize(n_joints);
   q_dot_cmd_.setZero();
   v_target_.setZero();
 
-  // 6. Setup Subscriber & Buffer
+  // 6. Subscriber
   sub_cmd_vel_ = get_node()->create_subscription<geometry_msgs::msg::Twist>(
     "~/cmd_vel", rclcpp::SystemDefaultsQoS(),
     std::bind(&CartesianVelocityController::cmdVelCallback, this, std::placeholders::_1));
@@ -124,7 +114,6 @@ controller_interface::InterfaceConfiguration CartesianVelocityController::state_
 controller_interface::CallbackReturn CartesianVelocityController::on_activate(
   const rclcpp_lifecycle::State & /*previous_state*/)
 {
-  // Reset command buffers
   q_dot_cmd_.setZero();
   v_target_.setZero();
   return controller_interface::CallbackReturn::SUCCESS;
@@ -133,9 +122,8 @@ controller_interface::CallbackReturn CartesianVelocityController::on_activate(
 controller_interface::CallbackReturn CartesianVelocityController::on_deactivate(
   const rclcpp_lifecycle::State & /*previous_state*/)
 {
-  // Stop Robot
-  for (size_t i = 0; i < command_interfaces_.size(); ++i) {
-    command_interfaces_[i].set_value(0.0);
+  for (auto & interface : command_interfaces_) {
+    interface.set_value(0.0);
   }
   return controller_interface::CallbackReturn::SUCCESS;
 }
@@ -143,29 +131,70 @@ controller_interface::CallbackReturn CartesianVelocityController::on_deactivate(
 controller_interface::return_type CartesianVelocityController::update(
   const rclcpp::Time & /*time*/, const rclcpp::Duration & /*period*/)
 {
-  // 1. Get Command from Realtime Buffer
-  auto msg = *cmd_vel_buffer_.readFromRT();
-  if (!msg) return controller_interface::return_type::OK;
-
-  v_target_ << msg->linear.x, msg->linear.y, msg->linear.z,
-               msg->angular.x, msg->angular.y, msg->angular.z;
-
-  // 2. Read Feedback
+  // 1. Đọc Feedback từ Hardware
   for (size_t i = 0; i < joint_names_.size(); ++i) {
     q_current_(i) = state_interfaces_[i].get_value();
   }
 
-  // 3. Solve Kinematics (Pure Math Calculation)
+  // 2. GIAO TIẾP SHARED MEMORY (Real-time safe)
+  bool shm_cmd_active = false;
+  auto* shm_data = shm_manager_->get();
+
+  if (shm_data) {
+    // A. Ghi trạng thái Joint
+    for(size_t i=0; i<joint_names_.size() && i<6; ++i) {
+        shm_data->joint_pos[i] = q_current_(i);
+    }
+
+    // B. Tính và Ghi FK (Thêm Log Debug)
+    KDL::Frame pose;
+    if (fk_solver_->calculate(q_current_, pose)) {
+        // Ghi vào SHM
+        shm_data->ee_pos[0] = pose.p.x();
+        shm_data->ee_pos[1] = pose.p.y();
+        shm_data->ee_pos[2] = pose.p.z();
+        
+        double r, p, y;
+        pose.M.GetRPY(r, p, y);
+        shm_data->ee_rpy[0] = r;
+        shm_data->ee_rpy[1] = p;
+        shm_data->ee_rpy[2] = y;
+
+        // DEBUG: In ra terminal 1 lần mỗi giây để kiểm tra
+        static int print_count = 0;
+        if (print_count++ % 100 == 0) { // 100Hz -> 1s in 1 lần
+            //  printf("[Controller] FK OK: X=%.3f Y=%.3f Z=%.3f\n", 
+            //         pose.p.x(), pose.p.y(), pose.p.z());
+        }
+    } else {
+        printf("[Controller] FK Calculation FAILED!\n");
+    }
+
+    // B. Đọc lệnh từ SHM (Nếu GUI đang active)
+    if (shm_data->cmd_active) {
+        v_target_ << shm_data->cmd_linear[0], shm_data->cmd_linear[1], shm_data->cmd_linear[2],
+                      shm_data->cmd_angular[0], shm_data->cmd_angular[1], shm_data->cmd_angular[2];
+        shm_cmd_active = true;
+    }
+  }
+
+  // 3. Nếu SHM không gửi lệnh, lấy từ Topic (Backup)
+  if (!shm_cmd_active) {
+      auto msg = *cmd_vel_buffer_.readFromRT();
+      if (msg) {
+          v_target_ << msg->linear.x, msg->linear.y, msg->linear.z,
+                       msg->angular.x, msg->angular.y, msg->angular.z;
+      }
+  }
+
+  // 4. Giải bài toán động học nghịch đảo
   if (kinematics_solver_->convertCartToJnt(q_current_, v_target_, q_dot_cmd_)) {
-    // 4. Send Command
+    // Gửi lệnh xuống khớp
     for (size_t i = 0; i < joint_names_.size(); ++i) {
       command_interfaces_[i].set_value(q_dot_cmd_(i));
     }
   } else {
-    // Hạn chế in log quá nhiều trong vòng lặp realtime
-    RCLCPP_WARN_THROTTLE(get_node()->get_logger(), *get_node()->get_clock(), 2000, "IK Solver Failed or Limit Reached!");
-    
-    // Stop Robot on Error
+    // Dừng robot nếu lỗi
     for (auto & interface : command_interfaces_) interface.set_value(0.0);
   }
 
@@ -177,7 +206,7 @@ void CartesianVelocityController::cmdVelCallback(const geometry_msgs::msg::Twist
   cmd_vel_buffer_.writeFromNonRT(msg);
 }
 
-}  // namespace my_robot_controllers
+} 
 
 PLUGINLIB_EXPORT_CLASS(
   my_robot_controllers::CartesianVelocityController, controller_interface::ControllerInterface)
