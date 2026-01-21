@@ -70,11 +70,11 @@ def generate_launch_description():
         executable="spawner",
         arguments=["my_cartesian_controller"],
     )
-    gripper_controller_spawner = Node(
-        package="controller_manager",
-        executable="spawner",
-        arguments=["gripper_controller"],
-    )
+    # gripper_controller_spawner = Node(
+    #     package="controller_manager",
+    #     executable="spawner",
+    #     arguments=["gripper_controller"],
+    # )
     # 5. Xử lý thứ tự chạy (Delay)
     # Chạy cartesian_controller SAU KHI joint_state_broadcaster đã chạy xong
     delay_controller = RegisterEventHandler(
@@ -89,6 +89,6 @@ def generate_launch_description():
         robot_state_pub_node,
         rviz_node,
         joint_state_broadcaster,
-        gripper_controller_spawner,
+        # gripper_controller_spawner,
         delay_controller,
     ])

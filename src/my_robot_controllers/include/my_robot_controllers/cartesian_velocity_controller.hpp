@@ -8,13 +8,12 @@
 #include "controller_interface/controller_interface.hpp"
 #include "geometry_msgs/msg/twist.hpp"
 #include "rclcpp/rclcpp.hpp"
-#include "realtime_tools/realtime_buffer.h"
 
-// 1. Include thư viện Algo
+#include "realtime_tools/realtime_buffer.hpp" 
+
+// Các module nội bộ
 #include "my_robot_controllers/algo/robot_kinematics.hpp"
-// 2. Include thư viện FK (để tính vị trí gửi ra SHM)
 #include "my_robot_controllers/algo/fk_solver.hpp"
-// 3. Include thư viện SHM
 #include "my_robot_controllers/shm/shm_manager.hpp"
 
 namespace my_robot_controllers
@@ -38,19 +37,17 @@ private:
   std::string base_link_;
   std::string end_effector_link_;
 
-  // Modules Toán học
+  // Modules
   std::shared_ptr<algo::RobotKinematics> kinematics_solver_;
-  std::shared_ptr<algo::FkSolver> fk_solver_; // Mới thêm
-
-  // Module Giao tiếp Shared Memory
+  std::shared_ptr<algo::FkSolver> fk_solver_;
   std::shared_ptr<shm::ShmManager> shm_manager_;
 
-  // Biến lưu trạng thái
+  // Variables
   KDL::JntArray q_current_;
   algo::VectorXd q_dot_cmd_;
   algo::Vector6d v_target_;
 
-  // Real-time Buffer (Topic backup)
+  // Buffer
   realtime_tools::RealtimeBuffer<std::shared_ptr<geometry_msgs::msg::Twist>> cmd_vel_buffer_;
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr sub_cmd_vel_;
 

@@ -11,8 +11,8 @@ controller_manager:
       type: my_robot_controllers/CartesianVelocityController
 
     # 3. Gripper Controller: Điều khiển vị trí đơn giản
-    gripper_controller:
-      type: joint_trajectory_controller/JointTrajectoryController
+    # gripper_controller:
+    #   type: joint_trajectory_controller/JointTrajectoryController
 
 # --- CẤU HÌNH CHI TIẾT ---
 
@@ -29,23 +29,4 @@ my_cartesian_controller:
     
     # Khâu gốc và khâu cuối để tính toán động học
     base_link: "base_link"
-    end_effector_link: "Link_6" 
-
-gripper_controller:
-  ros__parameters:
-    # 1. Khai báo khớp
-    joints:
-      - gripper_motor_joint
-    
-    command_interfaces:
-      - position
-    
-    state_interfaces:
-      - position
-      - velocity
-      
-    # 3. Cấu hình phụ trợ cho Mock Hardware
-    # open_loop_control = true giúp controller không yêu cầu PID gains, 
-    # rất quan trọng khi chạy mô phỏng (Mock) để tránh lỗi "Gains not found"
-    open_loop_control: true
-    allow_partial_joints_goal: true
+    end_effector_link: "tool_center_point" 

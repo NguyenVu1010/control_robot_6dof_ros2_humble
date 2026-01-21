@@ -1,276 +1,313 @@
 import sys
 import mmap
 import struct
-import time
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QLabel, QGroupBox, QSlider, QPushButton, 
-                             QGridLayout, QProgressBar, QMessageBox)
+                             QGridLayout, QProgressBar, QMessageBox, QDoubleSpinBox)
 from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtGui import QFont, QColor, QPalette
 
 # --- CẤU HÌNH SHARED MEMORY ---
-# Phải khớp với C++ struct RobotData
-# offsets:
-# 0-48:   Joint Pos (6 double)
-# 48-96:  Joint Vel (6 double)
-# 96-120: EE Pos (3 double)
+# Phải khớp 100% với struct RobotData bên C++
+# 0-48:    Joint Pos (6 double)
+# 48-96:   Joint Vel (6 double)
+# 96-120:  EE Pos (3 double)
 # 120-144: EE RPY (3 double)
-# 144-168: Cmd Linear (3 double)
-# 168-192: Cmd Angular (3 double)
-# 192:     Cmd Active (bool)
-# 193:     Sys Ready (bool)
+# 144-168: Target Pos (3 double)
+# 168-192: Target RPY (3 double)
+# 192-200: Cmd Gripper (1 double)
+# 200:     Cmd Active (bool)
+# 201:     Sys Ready (bool)
 SHM_NAME = "/robot_control_shm"
-SHM_SIZE = 200 # Ước lượng an toàn
 
 class RobotInterface(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Robot Control Interface (Shared Memory)")
-        self.setGeometry(100, 100, 900, 600)
+        self.setWindowTitle("Robot Control Interface (Position Mode)")
+        self.setGeometry(100, 100, 1100, 700)
         self.shm = None
         
-        # Biến lưu lệnh điều khiển
-        self.cmd_lin = [0.0, 0.0, 0.0]
-        self.cmd_ang = [0.0, 0.0, 0.0]
+        # Biến lưu trữ lệnh
+        self.target_pos = [0.0, 0.0, 0.0]
+        self.target_rpy = [0.0, 0.0, 0.0]
+        self.cmd_gripper = 0.0
         self.is_active = False
 
         self.init_ui()
         self.connect_shm()
 
-        # Timer cập nhật giao diện (30 FPS)
+        # Timer 30ms (khoảng 30FPS)
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_loop)
-        self.timer.start(33) 
+        self.timer.start(30)
 
     def connect_shm(self):
         try:
-            # Mở shared memory file trong /dev/shm
             f = open('/dev/shm' + SHM_NAME, 'r+b')
             self.shm = mmap.mmap(f.fileno(), 0)
-            self.status_label.setText("STATUS: CONNECTED")
-            self.status_label.setStyleSheet("color: green; font-weight: bold;")
+            self.status_label.setText("CONNECTED")
+            self.status_label.setStyleSheet("color: #4CAF50; font-weight: bold; font-size: 14px;")
         except FileNotFoundError:
-            self.status_label.setText("STATUS: ROBOT NOT RUNNING")
-            self.status_label.setStyleSheet("color: red; font-weight: bold;")
-            QMessageBox.critical(self, "Error", "Không tìm thấy Robot Controller!\nHãy chạy 'ros2 launch...' trước.")
+            self.status_label.setText("DISCONNECTED (Run ROS2 Launch first!)")
+            self.status_label.setStyleSheet("color: #F44336; font-weight: bold; font-size: 14px;")
 
     def init_ui(self):
         main_widget = QWidget()
-        main_layout = QHBoxLayout()
+        layout = QHBoxLayout()
         
-        # --- CỘT TRÁI: HIỂN THỊ THÔNG TIN ---
+        # ==========================
+        # PANEL TRÁI: GIÁM SÁT (MONITOR)
+        # ==========================
         left_panel = QVBoxLayout()
         
-        # 1. Joint States Group
-        gb_joints = QGroupBox("Joint Positions (rad)")
-        layout_joints = QGridLayout()
-        self.joint_bars = []
+        # 1. Joint Monitor
+        gb_joints = QGroupBox("Joint States (Feedback)")
+        l_joints = QGridLayout()
         self.joint_labels = []
         for i in range(6):
-            lbl_name = QLabel(f"J{i+1}:")
-            val_lbl = QLabel("0.00")
-            pbar = QProgressBar()
-            pbar.setRange(-314, 314) # -3.14 đến 3.14 rad
-            pbar.setTextVisible(False)
+            l_joints.addWidget(QLabel(f"Joint {i+1}:"), i, 0)
             
-            layout_joints.addWidget(lbl_name, i, 0)
-            layout_joints.addWidget(pbar, i, 1)
-            layout_joints.addWidget(val_lbl, i, 2)
+            pb = QProgressBar()
+            pb.setRange(-314, 314) # -3.14 to 3.14 rad
+            pb.setTextVisible(False)
+            pb.setStyleSheet("QProgressBar::chunk { background-color: #2196F3; }")
             
-            self.joint_bars.append(pbar)
-            self.joint_labels.append(val_lbl)
-        gb_joints.setLayout(layout_joints)
+            val = QLabel("0.00")
+            val.setFixedWidth(50)
+            val.setAlignment(Qt.AlignmentFlag.AlignRight)
+            
+            l_joints.addWidget(pb, i, 1)
+            l_joints.addWidget(val, i, 2)
+            self.joint_labels.append((pb, val))
+        gb_joints.setLayout(l_joints)
         left_panel.addWidget(gb_joints)
 
-        # 2. End-Effector Group
-        gb_ee = QGroupBox("End-Effector Pose")
-        layout_ee = QGridLayout()
+        # 2. End-Effector Monitor
+        gb_ee = QGroupBox("End-Effector Pose (Feedback)")
+        l_ee = QGridLayout()
         self.ee_labels = {}
-        tags = ["X", "Y", "Z", "Roll", "Pitch", "Yaw"]
-        for i, tag in enumerate(tags):
-            lbl = QLabel(f"{tag}:")
-            val = QLabel("0.000")
-            val.setFont(QFont("Arial", 12, QFont.Weight.Bold))
-            layout_ee.addWidget(lbl, i, 0)
-            layout_ee.addWidget(val, i, 1)
-            self.ee_labels[tag] = val
-        gb_ee.setLayout(layout_ee)
+        # Dùng tên đầy đủ để hiển thị
+        monitor_tags = ["X", "Y", "Z", "Roll", "Pitch", "Yaw"]
+        for i, tag in enumerate(monitor_tags):
+            lbl_title = QLabel(f"{tag}:")
+            lbl_val = QLabel("0.000")
+            lbl_val.setFont(QFont("Consolas", 14, QFont.Weight.Bold))
+            lbl_val.setStyleSheet("color: #FFC107;") # Màu vàng nổi bật
+            
+            row = i // 3
+            col = (i % 3) * 2
+            l_ee.addWidget(lbl_title, row, col)
+            l_ee.addWidget(lbl_val, row, col + 1)
+            self.ee_labels[tag] = lbl_val
+        gb_ee.setLayout(l_ee)
         left_panel.addWidget(gb_ee)
 
-        # --- CỘT PHẢI: ĐIỀU KHIỂN ---
+        # ==========================
+        # PANEL PHẢI: ĐIỀU KHIỂN (CONTROL)
+        # ==========================
         right_panel = QVBoxLayout()
 
-        # 1. Control Switch
+        # Nút kích hoạt chính
         self.btn_active = QPushButton("ENABLE CONTROL")
         self.btn_active.setCheckable(True)
-        self.btn_active.setStyleSheet("background-color: gray; color: white; padding: 10px;")
+        self.btn_active.setMinimumHeight(60)
+        self.btn_active.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        self.btn_active.setStyleSheet("background-color: #546E7A; color: white; border-radius: 5px;")
         self.btn_active.clicked.connect(self.toggle_control)
         right_panel.addWidget(self.btn_active)
 
-        # 2. Velocity Sliders
-        gb_cmd = QGroupBox("Velocity Command")
-        layout_cmd = QVBoxLayout()
+        # 1. Arm Control (Target Position)
+        gb_arm = QGroupBox("Arm Target Control")
+        gb_arm.setStyleSheet("QGroupBox { font-weight: bold; border: 1px solid #757575; margin-top: 10px; }")
+        l_arm = QGridLayout()
         
-        self.sliders = {}
-        axes = [("Linear X", 0, 0), ("Linear Y", 0, 1), ("Linear Z", 0, 2),
-                ("Angular R", 1, 0), ("Angular P", 1, 1), ("Angular Y", 1, 2)]
+        self.arm_inputs = {}
+        # SỬA LỖI: Dùng tên khác nhau cho Y và Yaw để không bị trùng key trong Dict
+        self.control_tags = ["X", "Y", "Z", "Roll", "Pitch", "Yaw"]
         
-        for name, type_idx, axis_idx in axes:
-            h_layout = QHBoxLayout()
-            lbl = QLabel(name)
-            lbl.setFixedWidth(80)
+        for i, tag in enumerate(self.control_tags):
+            spin = QDoubleSpinBox()
+            spin.setRange(-3.14, 3.14) # Giới hạn nhập liệu
+            spin.setSingleStep(0.01)
+            spin.setDecimals(3)
+            spin.setEnabled(False) # Mặc định khóa
+            spin.valueChanged.connect(self.update_arm_target)
             
-            # Slider range: -100 to 100 (tương ứng -0.5 m/s đến 0.5 m/s)
-            slider = QSlider(Qt.Orientation.Horizontal)
-            slider.setRange(-100, 100)
-            slider.setValue(0)
-            slider.setEnabled(False)
-            slider.valueChanged.connect(lambda val, t=type_idx, a=axis_idx: self.update_cmd(t, a, val))
-            
-            val_lbl = QLabel("0.00")
-            val_lbl.setFixedWidth(40)
-            
-            h_layout.addWidget(lbl)
-            h_layout.addWidget(slider)
-            h_layout.addWidget(val_lbl)
-            layout_cmd.addLayout(h_layout)
-            
-            self.sliders[f"{type_idx}_{axis_idx}"] = (slider, val_lbl)
+            # Style cho ô nhập liệu
+            spin.setStyleSheet("QDoubleSpinBox { padding: 5px; font-size: 14px; }")
 
-        # Nút Stop khẩn cấp
-        btn_stop = QPushButton("EMERGENCY STOP")
-        btn_stop.setStyleSheet("background-color: red; color: white; font-weight: bold; height: 50px;")
-        btn_stop.clicked.connect(self.stop_robot)
-        layout_cmd.addWidget(btn_stop)
+            l_arm.addWidget(QLabel(tag), i, 0)
+            l_arm.addWidget(spin, i, 1)
+            self.arm_inputs[tag] = spin
         
-        gb_cmd.setLayout(layout_cmd)
-        right_panel.addWidget(gb_cmd)
+        gb_arm.setLayout(l_arm)
+        right_panel.addWidget(gb_arm)
 
-        # Status Footer
-        self.status_label = QLabel("STATUS: DISCONNECTED")
+        # 2. Gripper Control
+        gb_grip = QGroupBox("Gripper Control")
+        gb_grip.setStyleSheet("QGroupBox { border: 1px solid #FF9800; margin-top: 10px; } QGroupBox::title { color: #FF9800; }")
+        l_grip = QVBoxLayout()
+        
+        # Slider
+        self.grip_slider = QSlider(Qt.Orientation.Horizontal)
+        self.grip_slider.setRange(0, 80) # 0.00 -> 0.80 rad
+        self.grip_slider.setEnabled(False)
+        self.grip_slider.valueChanged.connect(self.update_gripper_from_slider)
+        
+        # Spinbox hiển thị số
+        self.grip_spin = QDoubleSpinBox()
+        self.grip_spin.setRange(0.0, 0.8) 
+        self.grip_spin.setSingleStep(0.01)
+        self.grip_spin.setEnabled(False)
+        self.grip_spin.valueChanged.connect(self.update_gripper_from_spin)
+
+        h_grip = QHBoxLayout()
+        h_grip.addWidget(QLabel("Open"))
+        h_grip.addWidget(self.grip_slider)
+        h_grip.addWidget(QLabel("Close"))
+        
+        l_grip.addLayout(h_grip)
+        l_grip.addWidget(self.grip_spin)
+        gb_grip.setLayout(l_grip)
+        right_panel.addWidget(gb_grip)
+
+        # Layout chính
+        layout.addLayout(left_panel, 1)
+        layout.addLayout(right_panel, 1)
+        
+        # Footer Status
+        self.status_label = QLabel("INIT")
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.status_label.setFixedHeight(30)
         
-        # Add to main layout
-        main_layout.addLayout(left_panel, 1)
-        main_layout.addLayout(right_panel, 1)
-        
-        layout_container = QVBoxLayout()
-        layout_container.addLayout(main_layout)
-        layout_container.addWidget(self.status_label)
-        
-        main_widget.setLayout(layout_container)
+        main_box = QVBoxLayout()
+        main_box.addLayout(layout)
+        main_box.addWidget(self.status_label)
+        main_widget.setLayout(main_box)
         self.setCentralWidget(main_widget)
 
     def toggle_control(self):
         self.is_active = self.btn_active.isChecked()
         if self.is_active:
             self.btn_active.setText("CONTROL ACTIVE")
-            self.btn_active.setStyleSheet("background-color: green; color: white; padding: 10px;")
-            # Enable Sliders
-            for s, l in self.sliders.values(): s.setEnabled(True)
+            self.btn_active.setStyleSheet("background-color: #4CAF50; color: white; border-radius: 5px;")
+            # Mở khóa các ô nhập liệu
+            for s in self.arm_inputs.values(): s.setEnabled(True)
+            self.grip_slider.setEnabled(True)
+            self.grip_spin.setEnabled(True)
         else:
             self.btn_active.setText("ENABLE CONTROL")
-            self.btn_active.setStyleSheet("background-color: gray; color: white; padding: 10px;")
-            self.stop_robot() # Reset về 0
-            # Disable Sliders
-            for s, l in self.sliders.values(): s.setEnabled(False)
+            self.btn_active.setStyleSheet("background-color: #546E7A; color: white; border-radius: 5px;")
+            # Khóa lại
+            for s in self.arm_inputs.values(): s.setEnabled(False)
+            self.grip_slider.setEnabled(False)
+            self.grip_spin.setEnabled(False)
+            
+            # Gửi tín hiệu dừng ngay lập tức
+            if self.shm:
+                self.shm.seek(200)
+                self.shm.write(struct.pack('?', False))
 
-    def update_cmd(self, type_idx, axis_idx, val):
-        # Map -100..100 -> -0.5..0.5
-        real_val = val / 200.0 
-        if type_idx == 0: self.cmd_lin[axis_idx] = real_val
-        else: self.cmd_ang[axis_idx] = real_val
-        
-        # Update Label
-        slider, lbl = self.sliders[f"{type_idx}_{axis_idx}"]
-        lbl.setText(f"{real_val:.2f}")
+    def update_gripper_from_slider(self, val):
+        real_val = val / 100.0
+        self.grip_spin.blockSignals(True)
+        self.grip_spin.setValue(real_val)
+        self.grip_spin.blockSignals(False)
+        self.cmd_gripper = real_val
 
-    def stop_robot(self):
-        self.cmd_lin = [0.0, 0.0, 0.0]
-        self.cmd_ang = [0.0, 0.0, 0.0]
-        for s, l in self.sliders.values():
-            s.blockSignals(True)
-            s.setValue(0)
-            l.setText("0.00")
-            s.blockSignals(False)
+    def update_gripper_from_spin(self, val):
+        int_val = int(val * 100)
+        self.grip_slider.blockSignals(True)
+        self.grip_slider.setValue(int_val)
+        self.grip_slider.blockSignals(False)
+        self.cmd_gripper = val
+
+    def update_arm_target(self):
+        # Cập nhật biến target từ các ô nhập liệu
+        for i, tag in enumerate(self.control_tags):
+            val = self.arm_inputs[tag].value()
+            if i < 3: self.target_pos[i] = val
+            else: self.target_rpy[i-3] = val
 
     def update_loop(self):
-        if self.shm is None: return
+        if not self.shm: return
 
-        # --- 1. ĐỌC DỮ LIỆU TỪ C++ ---
         try:
+            # 1. ĐỌC DỮ LIỆU TỪ C++ (FEEDBACK)
             self.shm.seek(0)
-            # Đọc 18 double (Joint Pos + Joint Vel + EE Pos + EE RPY)
-            # 6 + 6 + 3 + 3 = 18 doubles = 144 bytes
-            data_bytes = self.shm.read(144)
+            # 18 doubles = 144 bytes
+            data_bytes = self.shm.read(144) 
             data = struct.unpack('18d', data_bytes)
             
-            # Cập nhật GUI
-            # Joints (0-5)
+            # Cập nhật thanh Joint
             for i in range(6):
-                val = data[i]
-                self.joint_bars[i].setValue(int(val * 100))
-                self.joint_labels[i].setText(f"{val:.3f}")
+                self.joint_labels[i][0].setValue(int(data[i]*100))
+                self.joint_labels[i][1].setText(f"{data[i]:.2f}")
             
-            # EE Pos (12-14)
-            self.ee_labels["X"].setText(f"{data[12]:.4f}")
-            self.ee_labels["Y"].setText(f"{data[13]:.4f}")
-            self.ee_labels["Z"].setText(f"{data[14]:.4f}")
-            
-            # EE RPY (15-17)
-            self.ee_labels["Roll"].setText(f"{data[15]:.3f}")
-            self.ee_labels["Pitch"].setText(f"{data[16]:.3f}")
-            self.ee_labels["Yaw"].setText(f"{data[17]:.3f}")
+            # Cập nhật hiển thị EE Pose
+            ee_vals = data[12:18] # Index 12-17
+            monitor_tags = ["X", "Y", "Z", "Roll", "Pitch", "Yaw"]
+            for i, tag in enumerate(monitor_tags):
+                self.ee_labels[tag].setText(f"{ee_vals[i]:.3f}")
+
+            # SYNC: Nếu chưa active, tự động điền giá trị hiện tại vào ô Target
+            # Để khi bấm Enable, robot không bị giật
+            if not self.is_active:
+                for i, tag in enumerate(self.control_tags):
+                    self.arm_inputs[tag].blockSignals(True)
+                    self.arm_inputs[tag].setValue(ee_vals[i])
+                    self.arm_inputs[tag].blockSignals(False)
+                    # Cập nhật luôn biến nội bộ
+                    if i < 3: self.target_pos[i] = ee_vals[i]
+                    else: self.target_rpy[i-3] = ee_vals[i]
+
+            # 2. GHI DỮ LIỆU XUỐNG C++ (COMMAND)
+            if self.is_active:
+                # Offset 144: 7 double (3 Pos + 3 RPY + 1 Grip)
+                cmd_bytes = struct.pack('7d', 
+                    self.target_pos[0], self.target_pos[1], self.target_pos[2],
+                    self.target_rpy[0], self.target_rpy[1], self.target_rpy[2],
+                    self.cmd_gripper) 
+                
+                self.shm.seek(144)
+                self.shm.write(cmd_bytes)
+                
+                # Offset 200: Bool Active
+                self.shm.seek(200)
+                self.shm.write(struct.pack('?', True))
 
         except Exception as e:
-            print(f"Read Error: {e}")
-
-        # --- 2. GHI LỆNH XUỐNG C++ ---
-        try:
-            # Ghi lệnh vào offset 144
-            # 3 double lin + 3 double ang = 6 doubles
-            cmd_bytes = struct.pack('6d', 
-                                    self.cmd_lin[0], self.cmd_lin[1], self.cmd_lin[2],
-                                    self.cmd_ang[0], self.cmd_ang[1], self.cmd_ang[2])
-            self.shm.seek(144)
-            self.shm.write(cmd_bytes)
-            
-            # Ghi cờ Active vào offset 192 (1 byte bool)
-            self.shm.seek(192)
-            self.shm.write(struct.pack('?', self.is_active))
-            
-        except Exception as e:
-            print(f"Write Error: {e}")
+            # print(f"Error: {e}") # Uncomment để debug nếu cần
+            pass
 
     def closeEvent(self, event):
-        # Khi tắt app, gửi lệnh dừng và ngắt kết nối
-        if self.shm:
-            self.stop_robot()
-            self.shm.seek(192)
-            self.shm.write(struct.pack('?', False)) # Active = False
+        if self.shm: 
+            # Gửi tín hiệu tắt
+            self.shm.seek(200)
+            self.shm.write(struct.pack('?', False))
             self.shm.close()
         event.accept()
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
     
-    # Set dark theme for cool look
-    palette = QPalette()
-    palette.setColor(QPalette.ColorRole.Window, QColor(53, 53, 53))
-    palette.setColor(QPalette.ColorRole.WindowText, Qt.GlobalColor.white)
-    palette.setColor(QPalette.ColorRole.Base, QColor(25, 25, 25))
-    palette.setColor(QPalette.ColorRole.AlternateBase, QColor(53, 53, 53))
-    palette.setColor(QPalette.ColorRole.ToolTipBase, Qt.GlobalColor.white)
-    palette.setColor(QPalette.ColorRole.ToolTipText, Qt.GlobalColor.white)
-    palette.setColor(QPalette.ColorRole.Text, Qt.GlobalColor.white)
-    palette.setColor(QPalette.ColorRole.Button, QColor(53, 53, 53))
-    palette.setColor(QPalette.ColorRole.ButtonText, Qt.GlobalColor.white)
-    palette.setColor(QPalette.ColorRole.BrightText, Qt.GlobalColor.red)
-    palette.setColor(QPalette.ColorRole.Link, QColor(42, 130, 218))
-    palette.setColor(QPalette.ColorRole.Highlight, QColor(42, 130, 218))
-    palette.setColor(QPalette.ColorRole.HighlightedText, Qt.GlobalColor.black)
-    app.setPalette(palette)
+    # Thiết lập giao diện tối (Dark Theme) cho chuyên nghiệp
+    p = QPalette()
+    p.setColor(QPalette.ColorRole.Window, QColor(40, 40, 40))
+    p.setColor(QPalette.ColorRole.WindowText, Qt.GlobalColor.white)
+    p.setColor(QPalette.ColorRole.Base, QColor(25, 25, 25))
+    p.setColor(QPalette.ColorRole.AlternateBase, QColor(53, 53, 53))
+    p.setColor(QPalette.ColorRole.ToolTipBase, Qt.GlobalColor.white)
+    p.setColor(QPalette.ColorRole.ToolTipText, Qt.GlobalColor.white)
+    p.setColor(QPalette.ColorRole.Text, Qt.GlobalColor.white)
+    p.setColor(QPalette.ColorRole.Button, QColor(60, 60, 60))
+    p.setColor(QPalette.ColorRole.ButtonText, Qt.GlobalColor.white)
+    p.setColor(QPalette.ColorRole.BrightText, Qt.GlobalColor.red)
+    p.setColor(QPalette.ColorRole.Link, QColor(42, 130, 218))
+    p.setColor(QPalette.ColorRole.Highlight, QColor(42, 130, 218))
+    p.setColor(QPalette.ColorRole.HighlightedText, Qt.GlobalColor.black)
+    app.setPalette(p)
 
-    window = RobotInterface()
-    window.show()
+    win = RobotInterface()
+    win.show()
     sys.exit(app.exec())
