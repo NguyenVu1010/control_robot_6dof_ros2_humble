@@ -24,6 +24,7 @@ add_library(cartesian_velocity_controller SHARED
   src/algo/math_utils.cpp
   src/algo/robot_kinematics.cpp
   src/algo/path_generator.cpp
+  src/algo/trajectory_solver.cpp
   src/shm/shm_manager.cpp
 )
 

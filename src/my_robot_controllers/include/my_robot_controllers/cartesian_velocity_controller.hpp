@@ -15,6 +15,7 @@
 #include "my_robot_controllers/algo/robot_kinematics.hpp"
 #include "my_robot_controllers/algo/fk_solver.hpp"
 #include "my_robot_controllers/shm/shm_manager.hpp"
+#include "my_robot_controllers/algo/trajectory_solver.hpp"
 
 namespace my_robot_controllers
 {
@@ -41,7 +42,7 @@ private:
   std::shared_ptr<algo::RobotKinematics> kinematics_solver_;
   std::shared_ptr<algo::FkSolver> fk_solver_;
   std::shared_ptr<shm::ShmManager> shm_manager_;
-
+  std::shared_ptr<algo::TrajectorySolver> traj_solver_;
   // Variables
   KDL::JntArray q_current_;
   algo::VectorXd q_dot_cmd_;

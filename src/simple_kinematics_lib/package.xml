@@ -1,0 +1,17 @@
+<package format="3">
+  <name>simple_kinematics_lib</name>
+  <version>0.0.1</version>
+  <description>Lightweight kinematics library using Eigen</description>
+  <maintainer email="user@todo.todo">user</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>urdf</depend>
+  <depend>libeigen-dev</depend> <!-- Hoặc eigen3_cmake_module -->
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

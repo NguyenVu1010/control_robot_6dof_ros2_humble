@@ -17,34 +17,34 @@ enum ControlMode {
 };
 
 struct RobotData {
-    // --- READ-ONLY (Robot gửi lên) ---
+    // Read-only (144 bytes) - Giữ nguyên
     double joint_pos[6];
     double joint_vel[6];
     double ee_pos[3];
     double ee_rpy[3];
 
-    // --- WRITE (GUI gửi xuống) ---
+    // Write (Bắt đầu từ 144)
+    int control_mode;    // 144
+    int _padding;        // 148
+
+    // --- DỮ LIỆU ĐIỀU KHIỂN ---
     
-    // 1. Chế độ điều khiển (0, 1, 2, 3)
-    int control_mode;
-
-    // 2. Dữ liệu cho MODE 1 (Pose Control)
-    double target_pos[3];
-    double target_rpy[3];
+    // 1. Target Pose (Dùng chung cho cả Mode Pose và Trajectory Point-to-Point)
+    double target_pos[3]; // 152
+    double target_rpy[3]; // 176
     
-    // 3. Dữ liệu cho MODE 2 (Trajectory Velocity Feed-forward)
-    // GUI sẽ stream vận tốc mong muốn vào đây (vx, vy, vz, wx, wy, wz)
-    double traj_vel_linear[3];
-    double traj_vel_angular[3];
+    // 2. Trajectory Params
+    double traj_duration; // 200 (Thời gian di chuyển, ví dụ 5.0 giây)
+    int traj_start_trigger; // 208 (GUI tăng số này lên để báo hiệu bắt đầu chạy)
 
-    // 4. Dữ liệu cho MODE 3 (Joint Manual)
-    double manual_joint_vel[6]; 
+    // 3. Manual Joints (Để điều khiển khớp tay)
+    double manual_joint_vel[6]; // 216
 
-    // 5. Kẹp (Dùng chung cho mọi mode)
-    double cmd_gripper;
+    // 4. Gripper
+    double cmd_gripper; // 264
 
-    std::atomic<bool> cmd_active; 
-    std::atomic<bool> sys_ready;
+    std::atomic<bool> cmd_active; // 272
+    std::atomic<bool> sys_ready;  // 273
 };
 
 } // namespace shm
