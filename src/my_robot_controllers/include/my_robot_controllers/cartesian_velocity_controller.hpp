@@ -64,11 +64,11 @@ private:
   srk::JntArray q_current_;   // Vị trí khớp hiện tại
   srk::JntArray q_dot_cmd_;   // Vận tốc khớp lệnh
   srk::Vector6d v_target_;    // Vận tốc Cartesian mong muốn (v, w)
-  
+  srk::Vector6d error_sum_; 
   // --- ROS 2 TOPIC (Dự phòng/Fallback) ---
   realtime_tools::RealtimeBuffer<std::shared_ptr<geometry_msgs::msg::Twist>> cmd_vel_buffer_;
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr sub_cmd_vel_;
-
+  void reset_integral() { error_sum_.setZero(); }
   void cmdVelCallback(const geometry_msgs::msg::Twist::SharedPtr msg);
 };
 

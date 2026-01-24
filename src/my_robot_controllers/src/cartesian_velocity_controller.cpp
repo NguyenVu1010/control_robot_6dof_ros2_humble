@@ -169,22 +169,62 @@ controller_interface::return_type CartesianVelocityController::update(
           // MODE 1: POSE CONTROL (Sử dụng hàm solveIK_Position của Lib)
           // =========================================================
           if (current_mode == shm::MODE_CARTESIAN_POSE) {
-              if (traj_gen_) traj_gen_->stop();
+            if (traj_gen_) traj_gen_->stop();
 
-              // Tạo Frame đích từ dữ liệu SHM
-              srk::Frame target_frame = srk::Frame::Identity();
-              target_frame.translation() << shm_data->target_pos[0], 
-                                            shm_data->target_pos[1], 
-                                            shm_data->target_pos[2];
-              
-              // Tạo Rotation từ RPY
-              target_frame.linear() = (Eigen::AngleAxisd(shm_data->target_rpy[0], Eigen::Vector3d::UnitX()) *
-                                       Eigen::AngleAxisd(shm_data->target_rpy[1], Eigen::Vector3d::UnitY()) *
-                                       Eigen::AngleAxisd(shm_data->target_rpy[2], Eigen::Vector3d::UnitZ())).toRotationMatrix();
+            // 1. Tính sai số (Error)
+            srk::Frame target_frame = srk::Frame::Identity();
+            target_frame.translation() << shm_data->target_pos[0], shm_data->target_pos[1], shm_data->target_pos[2];
+            target_frame.linear() = (Eigen::AngleAxisd(shm_data->target_rpy[0], Eigen::Vector3d::UnitX()) *
+                                    Eigen::AngleAxisd(shm_data->target_rpy[1], Eigen::Vector3d::UnitY()) *
+                                    Eigen::AngleAxisd(shm_data->target_rpy[2], Eigen::Vector3d::UnitZ())).toRotationMatrix();
 
-              // Gọi hàm solveIK_Position của thư viện mới
-              // Hàm này đã tích hợp P-Controller và xử lý Singularity
-              kinematics_core_->solveIK_Position(q_current_, target_frame, q_dot_cmd_);
+            Eigen::Vector3d p_err = target_frame.translation() - current_pose.translation();
+            
+            Eigen::Quaterniond q_cur(current_pose.linear());
+            Eigen::Quaterniond q_tar(target_frame.linear());
+            Eigen::Quaterniond q_diff = q_tar * q_cur.inverse();
+            Eigen::AngleAxisd aa(q_diff);
+            Eigen::Vector3d w_err = aa.axis() * aa.angle();
+
+            // 2. Tính toán PI (Proportional + Integral)
+            // dt = period.seconds()
+            double dt = period.seconds();
+            
+            // Cấu hình Gain (Bạn có thể đưa ra file yaml)
+            double Kp_lin = 5.0;
+            double Ki_lin = 0.5; // Tích phân nhẹ
+            double Kp_rot = 3.0;
+            double Ki_rot = 0.1;
+
+            // Giới hạn tích phân (Anti-Windup) - CỰC KỲ QUAN TRỌNG
+            // Ngăn không cho I cộng dồn quá lớn gây nguy hiểm
+            double max_i_lin = 0.2; // Tối đa đóng góp 0.2 m/s
+            double max_i_rot = 0.5; // Tối đa đóng góp 0.5 rad/s
+
+            // Tính toán Linear (XYZ)
+            for(int i=0; i<3; ++i) {
+                // Tích phân: Sum = Sum + Error * dt
+                error_sum_(i) += p_err(i) * dt;
+                
+                // Kẹp giá trị tích phân (Anti-windup)
+                error_sum_(i) = std::clamp(error_sum_(i), -max_i_lin/Ki_lin, max_i_lin/Ki_lin);
+                
+                // Công thức PI: V = Kp*E + Ki*Sum
+                v_target_(i) = Kp_lin * p_err(i) + Ki_lin * error_sum_(i);
+            }
+
+            // Tính toán Angular (RPY)
+            for(int i=0; i<3; ++i) {
+                error_sum_(i+3) += w_err(i) * dt;
+                error_sum_(i+3) = std::clamp(error_sum_(i+3), -max_i_rot/Ki_rot, max_i_rot/Ki_rot);
+                
+                v_target_(i+3) = Kp_rot * w_err(i) + Ki_rot * error_sum_(i+3);
+            }
+
+            // 3. Gọi IK Solver (Velocity Mode)
+            // Lưu ý: Ta dùng solveIK_Velocity chứ không dùng solveIK_Position nữa
+            // Vì ta đã tự tính vận tốc (v_target_) ở trên rồi.
+            kinematics_core_->solveIK_Velocity(q_current_, v_target_, q_dot_cmd_);
           }
           
           // =========================================================
