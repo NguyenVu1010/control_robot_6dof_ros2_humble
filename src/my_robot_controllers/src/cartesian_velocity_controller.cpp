@@ -163,7 +163,7 @@ controller_interface::return_type CartesianVelocityController::update(
       if (shm_data->cmd_active) {
           shm_active = true;
           current_mode = shm_data->control_mode;
-          target_gripper_pos = shm_data->cmd_gripper;
+          target_gripper_pos = -shm_data->cmd_gripper;
 
           // =========================================================
           // MODE 1: POSE CONTROL (Sử dụng hàm solveIK_Position của Lib)

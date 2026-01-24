@@ -83,7 +83,7 @@ class RobotGUI(QMainWindow):
 
     def on_gripper_change(self, val):
         """Chuyển giá trị slider 0-100 thành 0.0-1.0 gửi xuống C++"""
-        self.cmd_gripper = -val / 100.0
+        self.cmd_gripper = val / 100.0
 
     def toggle_active(self):
         self.is_active = self.btn_active.isChecked()
