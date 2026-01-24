@@ -2,7 +2,7 @@
 #include <iostream>
 #include <cmath>
 #include <algorithm>
-
+#include <eigen3/Eigen/SVD>
 // Forward declaration của hàm parser
 namespace srk {
     bool parseURDF(const std::string& xml, const std::string& base, const std::string& tip, Chain& chain);
@@ -126,26 +126,26 @@ bool KinematicsCore::solveIK_Velocity(const JntArray& q, const Vector6d& v_cart,
 bool KinematicsCore::solveIK_Position(const JntArray& q_current, const Frame& target, JntArray& q_dot_out) {
     if (!initialized_) return false;
 
-    // Biến tạm để lặp
     JntArray q_sol = q_current;
     Frame current_pose;
     Jacobian J(6, n_joints_);
     
-    // Cấu hình vòng lặp
-    int max_iter = 10;       // Số lần lặp tối đa (10 là đủ cho realtime 1ms)
-    double eps_pos = 1e-4;   // Sai số vị trí cho phép (0.1mm)
-    double eps_rot = 1e-3;   // Sai số góc cho phép
+    // Tăng số lần lặp để đảm bảo hội tụ chính xác
+    int max_iter = 500;
+    double eps_pos = 1e-6; // Độ chính xác 1 micromet
+    double eps_rot = 1e-5;
 
     for (int iter = 0; iter < max_iter; ++iter) {
-        // 1. Tính FK tại vị trí khớp ảo q_sol
         solveFK(q_sol, current_pose);
-
-        // 2. Tính sai số (Error Twist)
+        
+        // 1. Tính sai số
         Eigen::Vector3d p_err = target.translation() - current_pose.translation();
         
         Eigen::Quaterniond q_cur_R(current_pose.linear());
         Eigen::Quaterniond q_tar_R(target.linear());
-        // q_diff = q_target * q_current^-1
+        q_cur_R.normalize();
+        q_tar_R.normalize();
+        
         Eigen::Quaterniond q_diff = q_tar_R * q_cur_R.inverse();
         Eigen::AngleAxisd aa(q_diff);
         Eigen::Vector3d w_err = aa.axis() * aa.angle();
@@ -153,34 +153,60 @@ bool KinematicsCore::solveIK_Position(const JntArray& q_current, const Frame& ta
         Vector6d err_vec;
         err_vec << p_err, w_err;
 
-        // Check hội tụ
-        if (p_err.norm() < eps_pos && w_err.norm() < eps_rot) {
-            break; // Đã tìm thấy nghiệm chính xác
-        }
+        if (p_err.norm() < eps_pos && w_err.norm() < eps_rot) break; 
 
-        // 3. Tính Jacobian tại q_sol
+        // 2. Tính Jacobian
         internal_compute_jacobian(q_sol, J);
 
-        // 4. Tính delta_q để sửa lỗi (Dùng DLS nhẹ để ổn định vòng lặp)
-        double lambda = 0.05; 
-        Eigen::MatrixXd JJT = J * J.transpose();
-        JJT.diagonal().array() += lambda * lambda;
+        // 3. SVD VỚI DAMPING MƯỢT (Smooth Damped SVD)
+        // Đây là bí quyết để hết rung: Không cắt bỏ đột ngột
+        Eigen::JacobiSVD<Eigen::MatrixXd> svd(J, Eigen::ComputeThinU | Eigen::ComputeThinV);
         
-        JntArray delta_q = J.transpose() * JJT.ldlt().solve(err_vec);
+        Eigen::VectorXd singularValues = svd.singularValues();
+        Eigen::VectorXd singularValuesInv = singularValues;
+
+        // Hệ số damping cực nhỏ để không ảnh hưởng độ chính xác trong vùng làm việc
+        double lambda = 1e-4; 
+
+        for (int i = 0; i < singularValues.size(); ++i) {
+            double s = singularValues(i);
+            
+            // Công thức Damped SVD: s / (s^2 + lambda^2)
+            // - Khi s lớn (vùng an toàn): lambda^2 không đáng kể -> s/s^2 = 1/s (Nghịch đảo chuẩn -> Chính xác tuyệt đối)
+            // - Khi s nhỏ (vùng biên): lambda^2 chiếm ưu thế -> s tiến về 0 một cách mượt mà -> Không rung
+            singularValuesInv(i) = s / (s * s + lambda * lambda);
+        }
+
+        // Tính bước nhảy
+        JntArray delta_q = svd.matrixV() * singularValuesInv.asDiagonal() * svd.matrixU().transpose() * err_vec;
+
+        // 4. SCALING BƯỚC NHẢY (Thay vì Clamping)
+        // Giữ nguyên hướng di chuyển, chỉ giảm độ lớn nếu quá to
+        double max_step = 0.2; // Giảm xuống 0.2 để ổn định hơn ở biên
+        if (delta_q.norm() > max_step) {
+            delta_q = delta_q * (max_step / delta_q.norm());
+        }
         
-        // Cập nhật nghiệm
         q_sol += delta_q;
     }
 
-    // SAU KHI TÌM ĐƯỢC GÓC KHỚP ĐÍCH (q_sol)
-    // Tính vận tốc điều khiển theo kiểu P-Controller trong không gian khớp
-    // v = Kp * (q_target - q_current)
+    // 5. TÍNH VẬN TỐC VỚI GAIN ĐỘNG (DYNAMIC GAIN)
+    // Khi robot ở tư thế khó (Singularity), ta tự động giảm Gain xuống để nó vào khớp nhẹ nhàng
+    Eigen::JacobiSVD<Eigen::MatrixXd> svd_final(J, 0); // Tính SVD nhanh chỉ lấy giá trị kỳ dị
+    double min_singular_value = svd_final.singularValues().minCoeff();
     
-    double Kp_joint = 10.0; // Gain phản hồi khớp
-    q_dot_out = (q_sol - q_current) * Kp_joint;
+    double Kp_base = 20.0;
+    
+    // Nếu gần biên (min_singular_value nhỏ), giảm Gain xuống
+    if (min_singular_value < 0.1) {
+        Kp_base = 20.0 * (min_singular_value / 0.1); 
+        if (Kp_base < 1.0) Kp_base = 1.0; // Tối thiểu
+    }
 
-    // Clamp output lần cuối
-    double max_speed = 2.0;
+    q_dot_out = (q_sol - q_current) * Kp_base;
+
+    // 6. Safety Clamp
+    double max_speed = 3.0;
     for(int i=0; i<n_joints_; ++i) {
         if(q_dot_out(i) > max_speed) q_dot_out(i) = max_speed;
         if(q_dot_out(i) < -max_speed) q_dot_out(i) = -max_speed;
@@ -188,5 +214,4 @@ bool KinematicsCore::solveIK_Position(const JntArray& q_current, const Frame& ta
 
     return true;
 }
-
 } // namespace srk
