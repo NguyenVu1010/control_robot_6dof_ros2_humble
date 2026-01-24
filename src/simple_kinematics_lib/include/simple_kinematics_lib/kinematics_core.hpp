@@ -33,6 +33,7 @@ private:
     Chain chain_;
     unsigned int n_joints_;
     bool initialized_ = false;
+    void internal_compute_jacobian(const JntArray& q, Jacobian& J);
 };
 
 }

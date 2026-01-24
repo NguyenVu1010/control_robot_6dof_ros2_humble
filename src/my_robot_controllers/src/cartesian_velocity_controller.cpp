@@ -1,8 +1,7 @@
 #include "my_robot_controllers/cartesian_velocity_controller.hpp"
-#include "kdl_parser/kdl_parser.hpp"
 #include "pluginlib/class_list_macros.hpp"
-#include <kdl/chain.hpp> 
 #include <algorithm> // std::clamp
+#include <cmath>     // M_PI
 
 namespace my_robot_controllers
 {
@@ -35,62 +34,48 @@ controller_interface::CallbackReturn CartesianVelocityController::on_configure(
   std::string robot_desc = get_node()->get_parameter("robot_description").as_string();
 
   if (joint_names_.empty() || robot_desc.empty()) {
-    RCLCPP_ERROR(get_node()->get_logger(), "Parameters empty");
+    RCLCPP_ERROR(get_node()->get_logger(), "Parameters empty (joints or robot_description)");
     return controller_interface::CallbackReturn::ERROR;
   }
 
-  // 2. Parse KDL Tree from URDF
-  KDL::Tree kdl_tree;
-  if (!kdl_parser::treeFromString(robot_desc, kdl_tree)) {
-    RCLCPP_ERROR(get_node()->get_logger(), "Failed to parse URDF");
-    return controller_interface::CallbackReturn::ERROR;
-  }
+  // 2. Init Kinematics Core (Thư viện Simple Kinematics Lib)
+  // Lưu ý: kinematics_core_ là std::shared_ptr<srk::KinematicsCore>
+  kinematics_core_ = std::make_shared<srk::KinematicsCore>();
   
-  // 3. Validate Chain (Local check)
-  KDL::Chain kdl_chain;
-  if (!kdl_tree.getChain(base_link_, end_effector_link_, kdl_chain)) {
-    RCLCPP_ERROR(get_node()->get_logger(), "Failed to get chain from %s to %s", 
-                 base_link_.c_str(), end_effector_link_.c_str());
-    return controller_interface::CallbackReturn::ERROR;
-  }
-
-  // Check Joints count (Arm only)
-  if (kdl_chain.getNrOfJoints() != joint_names_.size()) {
-      RCLCPP_ERROR(get_node()->get_logger(), "Mismatch joints count! URDF: %d, YAML: %ld", 
-                   kdl_chain.getNrOfJoints(), joint_names_.size());
+  // Parse URDF trực tiếp từ chuỗi string thay vì kdl_parser
+  if (!kinematics_core_->init(robot_desc, base_link_, end_effector_link_)) {
+      RCLCPP_ERROR(get_node()->get_logger(), "Failed to init Simple Kinematics Lib (Check URDF/Link Names)");
       return controller_interface::CallbackReturn::ERROR;
   }
 
-  // 4. Init Algorithm Modules
-  // Module 1: IK Solver
-  kinematics_solver_ = std::make_shared<algo::RobotKinematics>(
-      kdl_tree, base_link_, end_effector_link_);
-      
-  // Module 2: FK Solver (Position Feedback)
-  fk_solver_ = std::make_shared<algo::FkSolver>(
-      kdl_tree, base_link_, end_effector_link_);
+  // Check Joints count
+  if (kinematics_core_->getNrOfJoints() != joint_names_.size()) {
+      RCLCPP_ERROR(get_node()->get_logger(), "Mismatch joints! Lib found: %d, YAML config: %ld", 
+                   kinematics_core_->getNrOfJoints(), joint_names_.size());
+      return controller_interface::CallbackReturn::ERROR;
+  }
 
-  // Module 3: Trajectory Solver (Path Planning)
-  // Lưu ý: Bạn cần thêm std::shared_ptr<algo::TrajectorySolver> traj_solver_; vào file .hpp
-  // Nếu chưa có, hãy thêm vào header. Hoặc khởi tạo local nếu chỉ dùng trong update (nhưng cần persistence).
-  // Giả sử đã có trong header:
-  traj_solver_ = std::make_shared<algo::TrajectorySolver>();
+  // 3. Init Trajectory Generator (Thư viện Simple Trajectory Lib)
+  traj_gen_ = std::make_shared<stl::TrajectoryGenerator>();
 
-  // 5. Init Shared Memory
+  // 4. Init Shared Memory (Server Mode = true)
   shm_manager_ = std::make_shared<shm::ShmManager>(shm::ROBOT_SHM_NAME, true);
   if (!shm_manager_->init()) {
       RCLCPP_ERROR(get_node()->get_logger(), "Failed to init Shared Memory!");
       return controller_interface::CallbackReturn::ERROR;
   }
 
-  // 6. Resize Variables
-  auto n_joints = kinematics_solver_->getNrOfJoints();
+  // 5. Resize Variables (Sử dụng kiểu dữ liệu của thư viện mới: Eigen Vector)
+  auto n_joints = kinematics_core_->getNrOfJoints();
   q_current_.resize(n_joints);
   q_dot_cmd_.resize(n_joints);
+  
+  // Reset về 0
   q_dot_cmd_.setZero();
+  q_current_.setZero();
   v_target_.setZero();
 
-  RCLCPP_INFO(get_node()->get_logger(), "Controller Configured Successfully. Ready for SHM.");
+  RCLCPP_INFO(get_node()->get_logger(), "Simple Kinematics Controller Configured Successfully!");
   return controller_interface::CallbackReturn::SUCCESS;
 }
 
@@ -104,8 +89,9 @@ controller_interface::InterfaceConfiguration CartesianVelocityController::comman
     config.names.push_back(joint + "/velocity");
   }
   
-  // 2. Gripper Joint (Position) - Index 6
-  config.names.push_back("finger_right_joint/position");
+  // 2. Gripper Joint (Position)
+  // Lưu ý: Tên khớp phải chính xác với URDF
+  config.names.push_back("gripper_right_joint/position");
 
   return config;
 }
@@ -114,7 +100,7 @@ controller_interface::InterfaceConfiguration CartesianVelocityController::state_
 {
   controller_interface::InterfaceConfiguration config;
   config.type = controller_interface::interface_configuration_type::INDIVIDUAL;
-  // Read Position of Arm Joints
+  // Feedback Position cho Arm
   for (const auto & joint : joint_names_) {
     config.names.push_back(joint + "/position");
   }
@@ -126,8 +112,7 @@ controller_interface::CallbackReturn CartesianVelocityController::on_activate(
 {
   q_dot_cmd_.setZero();
   v_target_.setZero();
-  // Reset Trajectory
-  if(traj_solver_) traj_solver_->stop();
+  if (traj_gen_) traj_gen_->stop();
   return controller_interface::CallbackReturn::SUCCESS;
 }
 
@@ -146,96 +131,100 @@ controller_interface::return_type CartesianVelocityController::update(
     q_current_(i) = state_interfaces_[i].get_value();
   }
 
-  // --- VARIABLES ---
   auto* shm_data = shm_manager_->get();
   bool shm_active = false;
   int current_mode = shm::MODE_IDLE;
   double target_gripper_pos = 0.0;
-  static int last_traj_trigger = 0; // Biến tĩnh để theo dõi trigger thay đổi
+  static int last_traj_trigger = 0;
 
-  // Default stop
-  v_target_.setZero();
-  q_dot_cmd_.setZero();
+  // 2. Tính FK (Forward Kinematics)
+  srk::Frame current_pose; // Eigen::Isometry3d
+  bool fk_ok = kinematics_core_->solveFK(q_current_, current_pose);
 
-  // 2. Xử lý Logic (FK + Control Modes)
-  KDL::Frame current_pose;
-  
-  // Tính FK
-  if (shm_data && fk_solver_->calculate(q_current_, current_pose)) {
+  if (shm_data && fk_ok) {
+      // --- GHI FEEDBACK RA SHM ---
+      Eigen::Vector3d pos = current_pose.translation();
+      shm_data->ee_pos[0] = pos.x();
+      shm_data->ee_pos[1] = pos.y();
+      shm_data->ee_pos[2] = pos.z();
       
-      // A. Ghi Feedback ra SHM
-      shm_data->ee_pos[0] = current_pose.p.x();
-      shm_data->ee_pos[1] = current_pose.p.y();
-      shm_data->ee_pos[2] = current_pose.p.z();
-      
-      double r, p, y; current_pose.M.GetRPY(r, p, y);
-      shm_data->ee_rpy[0] = r; shm_data->ee_rpy[1] = p; shm_data->ee_rpy[2] = y;
+      // Chuyển Rotation Matrix sang RPY (XYZ convention)
+      Eigen::Vector3d rpy = current_pose.rotation().eulerAngles(0, 1, 2); 
+      shm_data->ee_rpy[0] = rpy[0]; 
+      shm_data->ee_rpy[1] = rpy[1]; 
+      shm_data->ee_rpy[2] = rpy[2];
       
       for(size_t i=0; i<6; ++i) shm_data->joint_pos[i] = q_current_(i);
 
-      // B. Đọc Lệnh Điều Khiển
+      // --- ĐỌC LỆNH TỪ SHM ---
       if (shm_data->cmd_active) {
           shm_active = true;
           current_mode = shm_data->control_mode;
           target_gripper_pos = shm_data->cmd_gripper;
 
           // =========================================================
-          // MODE 1: POSE CONTROL (P-Controller: Position -> Velocity)
+          // MODE 1: POSE CONTROL (P-Controller tích hợp trong Lib)
           // =========================================================
           if (current_mode == shm::MODE_CARTESIAN_POSE) {
-              traj_solver_->stop(); // Dừng bộ sinh quỹ đạo nếu có
+              if (traj_gen_) traj_gen_->stop();
 
-              KDL::Vector target_p(shm_data->target_pos[0], shm_data->target_pos[1], shm_data->target_pos[2]);
-              KDL::Rotation target_M = KDL::Rotation::RPY(shm_data->target_rpy[0], shm_data->target_rpy[1], shm_data->target_rpy[2]);
+              // Tạo Frame đích từ dữ liệu SHM
+              srk::Frame target_frame = srk::Frame::Identity();
+              target_frame.translation() << shm_data->target_pos[0], 
+                                            shm_data->target_pos[1], 
+                                            shm_data->target_pos[2];
               
-              // Tính sai số
-              KDL::Twist error = KDL::diff(current_pose, KDL::Frame(target_M, target_p));
+              // Tạo Rotation từ RPY
+              target_frame.linear() = (Eigen::AngleAxisd(shm_data->target_rpy[0], Eigen::Vector3d::UnitX()) *
+                                       Eigen::AngleAxisd(shm_data->target_rpy[1], Eigen::Vector3d::UnitY()) *
+                                       Eigen::AngleAxisd(shm_data->target_rpy[2], Eigen::Vector3d::UnitZ())).toRotationMatrix();
 
-              // Hệ số P
-              double Kp_lin = 4.0;
-              double Kp_ang = 2.0;
-              double max_lin = 0.5; 
-              double max_ang = 1.0;
-
-              for(int i=0; i<3; ++i) {
-                  v_target_(i)   = std::clamp(error.vel(i) * Kp_lin, -max_lin, max_lin);
-                  v_target_(i+3) = std::clamp(error.rot(i) * Kp_ang, -max_ang, max_ang);
-              }
-              // Deadzone
-              if (error.vel.Norm() < 0.002 && error.rot.Norm() < 0.02) v_target_.setZero();
+              // Gọi hàm solveIK_Position của thư viện mới
+              // Hàm này tự tính sai số và nhân Gain để ra vận tốc khớp
+              kinematics_core_->solveIK_Position(q_current_, target_frame, q_dot_cmd_);
           }
           
           // =========================================================
           // MODE 2: TRAJECTORY (Point-to-Point Interpolation)
           // =========================================================
           else if (current_mode == shm::MODE_TRAJECTORY) {
-              int trigger = shm_data->traj_start_trigger; // Offset 208 in SHM struct
-              
-              // Nếu GUI bấm nút Trigger (giá trị thay đổi) -> Setup hành trình mới
-              if (trigger != last_traj_trigger) {
-                  last_traj_trigger = trigger;
+              // Check Trigger từ GUI
+              int trig = shm_data->traj_start_trigger; 
+              if (trig != last_traj_trigger) {
+                  last_traj_trigger = trig;
                   
-                  KDL::Vector p_end(shm_data->target_pos[0], shm_data->target_pos[1], shm_data->target_pos[2]);
-                  KDL::Rotation m_end = KDL::Rotation::RPY(shm_data->target_rpy[0], shm_data->target_rpy[1], shm_data->target_rpy[2]);
+                  // Setup Path (Current -> Target)
+                  srk::Frame end_pose = srk::Frame::Identity();
+                  end_pose.translation() << shm_data->target_pos[0], 
+                                            shm_data->target_pos[1], 
+                                            shm_data->target_pos[2];
+                  end_pose.linear() = (Eigen::AngleAxisd(shm_data->target_rpy[0], Eigen::Vector3d::UnitX()) *
+                                       Eigen::AngleAxisd(shm_data->target_rpy[1], Eigen::Vector3d::UnitY()) *
+                                       Eigen::AngleAxisd(shm_data->target_rpy[2], Eigen::Vector3d::UnitZ())).toRotationMatrix();
                   
-                  double T = shm_data->traj_duration; // Offset 200
-                  if(T < 0.5) T = 0.5;
+                  double T = shm_data->traj_duration; 
+                  if (T < 0.5) T = 0.5;
 
-                  // Gọi module solver để set quỹ đạo từ Current -> End trong T giây
-                  traj_solver_->setTrajectory(current_pose, KDL::Frame(m_end, p_end), T);
+                  traj_gen_->setPath(current_pose, end_pose, T);
               }
 
-              // Tính vận tốc tại bước thời gian hiện tại
-              // Hàm computeVelocity sẽ trả về v_target_ mượt mà
-              traj_solver_->computeVelocity(period.seconds(), v_target_);
+              // Compute Velocity Step (v_target_)
+              srk::Vector6d v_traj;
+              if (traj_gen_->computeStep(period.seconds(), v_traj)) {
+                  // Tính IK Velocity từ v_traj
+                  kinematics_core_->solveIK_Velocity(q_current_, v_traj, q_dot_cmd_);
+              } else {
+                  // Hết hành trình -> Dừng khớp
+                  q_dot_cmd_.setZero(); 
+              }
           }
 
           // =========================================================
-          // MODE 3: JOINT MANUAL (Direct Joint Velocity)
+          // MODE 3: JOINT MANUAL
           // =========================================================
           else if (current_mode == shm::MODE_JOINT_MANUAL) {
-              traj_solver_->stop();
-              // Đọc thẳng vận tốc khớp, không qua IK
+              if (traj_gen_) traj_gen_->stop();
+              // Gán trực tiếp, không qua IK
               for(int i=0; i<6; ++i) {
                   q_dot_cmd_(i) = shm_data->manual_joint_vel[i];
               }
@@ -243,34 +232,20 @@ controller_interface::return_type CartesianVelocityController::update(
       }
   }
 
-  // 3. GỬI LỆNH XUỐNG HARDWARE
-  
+  // 3. GỬI LỆNH XUỐNG HARDWARE (ARM)
   if (!shm_active) {
-      // An toàn: Dừng robot
+      // Dừng an toàn
       for (size_t i = 0; i < joint_names_.size(); ++i) command_interfaces_[i].set_value(0.0);
   }
   else {
-      // --- NHÁNH 1: MANUAL ---
-      if (current_mode == shm::MODE_JOINT_MANUAL) {
-          for (size_t i = 0; i < joint_names_.size(); ++i) {
-              command_interfaces_[i].set_value(q_dot_cmd_(i));
-          }
-      }
-      // --- NHÁNH 2: CARTESIAN (POSE & TRAJ) ---
-      else {
-          // Tính IK từ v_target_ (đã được tính bởi P-Controller hoặc TrajSolver)
-          if (kinematics_solver_->convertCartToJnt(q_current_, v_target_, q_dot_cmd_)) {
-              for (size_t i = 0; i < joint_names_.size(); ++i) {
-                  command_interfaces_[i].set_value(q_dot_cmd_(i));
-              }
-          } else {
-              // Lỗi IK -> Dừng
-              for (size_t i = 0; i < joint_names_.size(); ++i) command_interfaces_[i].set_value(0.0);
-          }
+      // Gửi q_dot_cmd_ (đã được tính toán ở trên tùy theo Mode)
+      for (size_t i = 0; i < joint_names_.size(); ++i) {
+          command_interfaces_[i].set_value(q_dot_cmd_(i));
       }
   }
 
-  // 4. ĐIỀU KHIỂN KẸP (Luôn hoạt động nếu SHM active)
+  // 4. GỬI LỆNH GRIPPER
+  // Interface kẹp là cái cuối cùng (index 6)
   if (shm_active && command_interfaces_.size() > 6) {
       command_interfaces_[6].set_value(target_gripper_pos);
   }
@@ -278,7 +253,7 @@ controller_interface::return_type CartesianVelocityController::update(
   return controller_interface::return_type::OK;
 }
 
-// Hàm này không dùng nữa
+// Deprecated callback
 void CartesianVelocityController::cmdVelCallback(const geometry_msgs::msg::Twist::SharedPtr /*msg*/) {}
 
 } 

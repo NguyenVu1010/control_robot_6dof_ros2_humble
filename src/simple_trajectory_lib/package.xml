@@ -1,0 +1,10 @@
+<package format="3">
+  <name>simple_trajectory_lib</name>
+  <version>0.0.1</version>
+  <description>Trajectory generation library using Eigen</description>
+  <maintainer email="user@todo.todo">user</maintainer>
+  <license>MIT</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>libeigen-dev</depend>
+  <export><build_type>ament_cmake</build_type></export>
+</package>

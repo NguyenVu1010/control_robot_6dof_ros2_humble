@@ -11,21 +11,17 @@ find_package(pluginlib REQUIRED)
 find_package(controller_interface REQUIRED)
 find_package(hardware_interface REQUIRED)
 find_package(geometry_msgs REQUIRED)
-find_package(kdl_parser REQUIRED)
-# CHỈ DÙNG VENDOR
-find_package(orocos_kdl_vendor REQUIRED) 
-find_package(Eigen3 REQUIRED)
 find_package(realtime_tools REQUIRED)
+find_package(Eigen3 REQUIRED)
 
+# --- 1. TÌM THƯ VIỆN MỚI ---
+find_package(simple_kinematics_lib REQUIRED)
+find_package(simple_trajectory_lib REQUIRED)
+
+# --- 2. TẠO THƯ VIỆN CONTROLLER ---
 add_library(cartesian_velocity_controller SHARED
   src/cartesian_velocity_controller.cpp
-  src/algo/fk_solver.cpp
-  src/algo/jacobian_solver.cpp
-  src/algo/math_utils.cpp
-  src/algo/robot_kinematics.cpp
-  src/algo/path_generator.cpp
-  src/algo/trajectory_solver.cpp
-  src/shm/shm_manager.cpp
+  src/shm/shm_manager.cpp  # Chỉ giữ lại source SHM nội bộ
 )
 
 target_include_directories(cartesian_velocity_controller PUBLIC
@@ -34,19 +30,20 @@ target_include_directories(cartesian_velocity_controller PUBLIC
   ${EIGEN3_INCLUDE_DIR}
 )
 
-# QUAN TRỌNG: Không dùng target_link_libraries thủ công
-# XÓA BỎ DÒNG: target_link_libraries(... orocos-kdl) NẾU CÓ
+# Link thư viện Realtime (cho shm_open)
+target_link_libraries(cartesian_velocity_controller rt)
 
+# --- 3. LIÊN KẾT DEPENDENCY ---
 ament_target_dependencies(cartesian_velocity_controller
   rclcpp
   pluginlib
   controller_interface
   hardware_interface
   geometry_msgs
-  kdl_parser
-  orocos_kdl_vendor  # Vendor sẽ tự động link đúng thư viện
   realtime_tools
   Eigen3
+  simple_kinematics_lib  # <--- Link Lib Kinematics
+  simple_trajectory_lib  # <--- Link Lib Trajectory
 )
 
 pluginlib_export_plugin_description_file(controller_interface my_robot_controllers_plugins.xml)
@@ -66,21 +63,15 @@ install(DIRECTORY include/
   DESTINATION include
 )
 
-install(DIRECTORY
-  config
+install(DIRECTORY config
   DESTINATION share/${PROJECT_NAME}
 )
 
 ament_export_include_directories(include)
 ament_export_libraries(cartesian_velocity_controller)
 ament_export_dependencies(
-  rclcpp
-  controller_interface
-  hardware_interface
-  kdl_parser
-  orocos_kdl_vendor
-  realtime_tools
-  Eigen3
+  rclcpp controller_interface hardware_interface realtime_tools 
+  simple_kinematics_lib simple_trajectory_lib
 )
 
 ament_package()

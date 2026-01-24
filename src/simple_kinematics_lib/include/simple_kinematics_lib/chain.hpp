@@ -12,18 +12,15 @@ enum JointType { FIXED, REVOLUTE, PRISMATIC };
 struct Segment {
     std::string name;
     JointType type;
-    Frame T_origin;       // Transform từ cha đến khớp
-    Eigen::Vector3d axis; // Trục quay
+    Frame T_origin;       // Transform từ Link Cha -> Khớp
+    Eigen::Vector3d axis; // Trục quay của khớp
 
-    // Tính transform dựa trên giá trị khớp q
-    Frame pose(double q) const {
-        if (type == FIXED) return T_origin;
-        
-        Eigen::Isometry3d T_joint = Eigen::Isometry3d::Identity();
-        if (type == REVOLUTE) T_joint.linear() = Eigen::AngleAxisd(q, axis).toRotationMatrix();
-        else if (type == PRISMATIC) T_joint.translation() = axis * q;
-        
-        return T_origin * T_joint;
+    // Chỉ lấy phần biến đổi do khớp gây ra (Xoay hoặc Tịnh tiến)
+    Frame jointTransform(double q) const {
+        Eigen::Isometry3d T = Eigen::Isometry3d::Identity();
+        if (type == REVOLUTE) T.linear() = Eigen::AngleAxisd(q, axis).toRotationMatrix();
+        else if (type == PRISMATIC) T.translation() = axis * q;
+        return T;
     }
 };
 
