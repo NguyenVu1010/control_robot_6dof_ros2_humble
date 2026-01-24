@@ -28,7 +28,7 @@ class RobotGUI(QMainWindow):
         self.current_mode = MODE_POSE
         self.target_pos = [0.0]*3
         self.target_rpy = [0.0]*3
-        self.traj_duration = 2.0
+        self.traj_duration = 4.0
         self.traj_trigger = 0
         self.manual_vel = [0.0]*6
         self.cmd_gripper = 0.0 # <--- Biến lưu giá trị kẹp
@@ -110,31 +110,40 @@ class RobotGUI(QMainWindow):
                 self.target_rpy = list(fb['pose'][3:])
                 self.tabs.pose_tab.update_ui_values(self.target_pos, self.target_rpy)
 
-        # Sequence Logic
+        # --- LOGIC THỰC THI CHUỖI HÀNH ĐỘNG ---
         mgr = self.seq_manager
         if self.is_active and mgr.is_running:
-            step = mgr.steps[mgr.current_idx]
-            self.target_pos, self.target_rpy = step['pos'], step['rpy']
-            self.cmd_gripper = step['grip']
-            self.traj_duration = step['dur']
-            
-            # Cập nhật thanh trượt kẹp trên giao diện khi chạy tự động
-            self.grip_slider.blockSignals(True)
-            self.grip_slider.setValue(int(self.cmd_gripper * 100))
-            self.grip_slider.blockSignals(False)
-            
-            self.tabs.pose_tab.update_ui_values(self.target_pos, self.target_rpy)
-            
-            mgr.timer_count += 0.03
-            if mgr.timer_count >= self.traj_duration:
-                mgr.timer_count = 0
-                mgr.current_idx += 1
-                self.traj_trigger += 1
-                if mgr.current_idx >= len(mgr.steps):
-                    mgr.is_running = False
-                    self.tabs.seq_tab.btn_run.setText("RUN SEQUENCE")
+            # 1. Kiểm tra index
+            if mgr.current_idx < len(mgr.steps):
+                step = mgr.steps[mgr.current_idx]
+                
+                # 2. Gán dữ liệu mục tiêu
+                self.target_pos = step['pos']
+                self.target_rpy = step['rpy']
+                self.cmd_gripper = step['grip']
+                self.traj_duration = step['dur']
+                
+                # Highlight bước đang chạy trên UI (Tùy chọn)
+                self.tabs.seq_tab.list_widget.setCurrentRow(mgr.current_idx)
+                
+                # 3. Đếm thời gian
+                mgr.timer_count += 0.03  # 30ms mỗi chu kỳ
+                
+                # 4. Khi hết thời gian của bước hiện tại -> Chuyển bước
+                if mgr.timer_count >= step['dur']:
+                    mgr.timer_count = 0
+                    mgr.current_idx += 1
+                    self.traj_trigger += 1  # QUAN TRỌNG: Tăng trigger để C++ tính quỹ đạo mới
+                    
+                    # Nếu vượt quá số bước -> Kết thúc
+                    if mgr.current_idx >= len(mgr.steps):
+                        mgr.is_running = False
+                        self.tabs.seq_tab.btn_run.setText("RUN SEQUENCE")
+                        self.tabs.seq_tab.btn_run.setStyleSheet("background-color: #D32F2F; color: white;")
+            else:
+                mgr.is_running = False
 
-        # GỬI DỮ LIỆU XUỐNG C++ (Bao gồm cả self.cmd_gripper)
+        # Ghi xuống Shared Memory
         self.shm.write_command(
             self.is_active, self.current_mode, self.target_pos, 
             self.target_rpy, self.traj_duration, self.traj_trigger, 

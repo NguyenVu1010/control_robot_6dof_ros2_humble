@@ -64,6 +64,7 @@ private:
   srk::JntArray q_current_;   // Vị trí khớp hiện tại
   srk::JntArray q_dot_cmd_;   // Vận tốc khớp lệnh
   srk::Vector6d v_target_;    // Vận tốc Cartesian mong muốn (v, w)
+  srk::Frame desired_pose_; 
   srk::Vector6d error_sum_; 
   // --- ROS 2 TOPIC (Dự phòng/Fallback) ---
   realtime_tools::RealtimeBuffer<std::shared_ptr<geometry_msgs::msg::Twist>> cmd_vel_buffer_;

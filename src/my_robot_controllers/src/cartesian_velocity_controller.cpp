@@ -164,7 +164,6 @@ controller_interface::return_type CartesianVelocityController::update(
           shm_active = true;
           current_mode = shm_data->control_mode;
           target_gripper_pos = -shm_data->cmd_gripper;
-
           // =========================================================
           // MODE 1: POSE CONTROL (Sử dụng hàm solveIK_Position của Lib)
           // =========================================================
@@ -231,35 +230,74 @@ controller_interface::return_type CartesianVelocityController::update(
           // MODE 2: TRAJECTORY (Sử dụng thư viện Simple Trajectory Lib)
           // =========================================================
           else if (current_mode == shm::MODE_TRAJECTORY) {
-              // Check Trigger từ GUI
-              int trig = shm_data->traj_start_trigger; 
-              if (trig != last_traj_trigger) {
-                  last_traj_trigger = trig;
-                  
-                  // Setup Path (Current -> Target)
-                  srk::Frame end_pose = srk::Frame::Identity();
-                  end_pose.translation() << shm_data->target_pos[0], 
-                                            shm_data->target_pos[1], 
-                                            shm_data->target_pos[2];
-                  end_pose.linear() = (Eigen::AngleAxisd(shm_data->target_rpy[0], Eigen::Vector3d::UnitX()) *
-                                       Eigen::AngleAxisd(shm_data->target_rpy[1], Eigen::Vector3d::UnitY()) *
-                                       Eigen::AngleAxisd(shm_data->target_rpy[2], Eigen::Vector3d::UnitZ())).toRotationMatrix();
-                  
-                  double T = shm_data->traj_duration; 
-                  if (T < 0.5) T = 0.5;
+            double dt = period.seconds();
+            int trig = shm_data->traj_start_trigger;
+            
+            if (trig != last_traj_trigger) {
+                last_traj_trigger = trig;
+                
+                // 1. Khi bắt đầu, đặt Pose lý tưởng = Pose thực tế hiện tại
+                desired_pose_ = current_pose;
+                error_sum_.setZero();
+                
+                // Khởi tạo đích đến cho thư viện
+                srk::Frame end_pose = srk::Frame::Identity();
+                end_pose.translation() << shm_data->target_pos[0], shm_data->target_pos[1], shm_data->target_pos[2];
+                end_pose.linear() = (Eigen::AngleAxisd(shm_data->target_rpy[0], Eigen::Vector3d::UnitX()) *
+                                    Eigen::AngleAxisd(shm_data->target_rpy[1], Eigen::Vector3d::UnitY()) *
+                                    Eigen::AngleAxisd(shm_data->target_rpy[2], Eigen::Vector3d::UnitZ())).toRotationMatrix();
+                
+                double T = shm_data->traj_duration;
+                if (T < 0.1) T = 0.5;
+                traj_gen_->setPath(current_pose, end_pose, T);
+            }
 
-                  traj_gen_->setPath(current_pose, end_pose, T);
-              }
+            // 2. Lấy vận tốc lý tưởng (Feedforward) từ thư viện (Dùng hàm 2 tham số hợp lệ)
+            srk::Vector6d v_feedforward;
+            if (traj_gen_->computeStep(dt, v_feedforward)) {
+                
+                // --- TỰ CẬP NHẬT POSE LÝ TƯỞNG (INTEGRATION) ---
+                // Tịnh tiến: P_new = P_old + V * dt
+                desired_pose_.translation() += v_feedforward.head<3>() * dt;
+                
+                // Quay: Sử dụng Quaternion tích phân để tránh lỗi Euler
+                Eigen::Vector3d w = v_feedforward.tail<3>();
+                if (w.norm() > 1e-6) {
+                    Eigen::Quaterniond delta_q(Eigen::AngleAxisd(w.norm() * dt, w.normalized()));
+                    desired_pose_.linear() = (delta_q * Eigen::Quaterniond(desired_pose_.linear())).toRotationMatrix();
+                }
 
-              // Compute Velocity Step
-              srk::Vector6d v_traj;
-              if (traj_gen_->computeStep(period.seconds(), v_traj)) {
-                  // Tính IK Velocity từ v_traj dùng thư viện động học
-                  kinematics_core_->solveIK_Velocity(q_current_, v_traj, q_dot_cmd_);
-              } else {
-                  // Hết hành trình -> Dừng khớp
-                  q_dot_cmd_.setZero(); 
-              }
+                // --- TÍNH SAI SỐ GIỮA POSE LÝ TƯỞNG VÀ THỰC TẾ ---
+                Eigen::Vector3d p_err = desired_pose_.translation() - current_pose.translation();
+                
+                Eigen::Quaterniond q_actual(current_pose.linear());
+                Eigen::Quaterniond q_desired(desired_pose_.linear());
+                Eigen::Quaterniond q_diff = q_desired * q_actual.inverse();
+                Eigen::AngleAxisd aa_err(q_diff);
+                Eigen::Vector3d w_err = aa_err.axis() * aa_err.angle();
+
+                // --- BỘ ĐIỀU KHIỂN BÙ SAI SỐ (FEEDBACK) ---
+                double Kp_track_lin = 20.0; // Tăng Gain để bám cực sát
+                double Kp_track_rot = 15.0;
+                double Ki_track = 0.1;
+
+                srk::Vector6d v_feedback;
+                for(int i=0; i<3; ++i) {
+                    error_sum_(i) += p_err(i) * dt;
+                    v_feedback(i) = Kp_track_lin * p_err(i) + Ki_track * error_sum_(i);
+                    
+                    error_sum_(i+3) += w_err(i) * dt;
+                    v_feedback(i+3) = Kp_track_rot * w_err(i) + Ki_track * error_sum_(i+3);
+                }
+
+                // TỔNG VẬN TỐC = LÝ THUYẾT + BÙ SAI SỐ
+                v_target_ = v_feedforward + v_feedback;
+
+                // Giải IK
+                kinematics_core_->solveIK_Velocity(q_current_, v_target_, q_dot_cmd_);
+            } else {
+                q_dot_cmd_.setZero();
+            }
           }
 
           // =========================================================
