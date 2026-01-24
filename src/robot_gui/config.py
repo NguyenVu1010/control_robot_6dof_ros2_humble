@@ -1,0 +1,21 @@
+# --- SHARED MEMORY ---
+SHM_NAME = "/robot_control_shm"
+
+# Offsets
+OFF_READ_START  = 0
+OFF_MODE        = 144
+OFF_TARGET_POS  = 152
+OFF_TARGET_RPY  = 176
+OFF_TRAJ_DUR    = 200
+OFF_TRAJ_TRIG   = 208
+OFF_MANUAL_J    = 216
+OFF_GRIPPER     = 264
+OFF_ACTIVE      = 272
+
+# Modes
+MODE_IDLE = 0
+MODE_POSE = 1
+MODE_TRAJECTORY = 2
+MODE_JOINT = 3
+
+COORD_KEYS = ["X", "Y", "Z", "Roll", "Pitch", "Yaw"]

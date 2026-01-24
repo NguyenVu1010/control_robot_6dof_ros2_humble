@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="my_arm_robot">
+
+  <!-- 1. Định nghĩa các Argument (Nhận từ Launch file) -->
+  <xacro:arg name="use_mock_hardware" default="false" />
+  <xacro:arg name="serial_port" default="/dev/ttyUSB0" />
+  <xacro:arg name="baud_rate" default="115200" />
+
+  <!-- 2. Import các file thành phần -->
+  <xacro:include filename="$(find my_arm_robot)/urdf/robot_core.xacro" />
+  <xacro:include filename="$(find my_arm_robot)/urdf/ros2_control.xacro" />
+
+  <!-- 3. Thực thi Macro điều khiển -->
+  <!-- Chú ý: Tên tham số ở đây phải khớp 100% với file ros2_control.xacro -->
+  <xacro:my_robot_ros2_control 
+    name="MyRobotSystem" 
+    use_mock_hardware="$(arg use_mock_hardware)" 
+    serial_port="$(arg serial_port)"
+    baud_rate="$(arg baud_rate)" 
+  />
+
+</robot>

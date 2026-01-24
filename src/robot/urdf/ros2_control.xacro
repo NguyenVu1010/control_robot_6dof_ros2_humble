@@ -1,0 +1,48 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <xacro:macro name="my_robot_ros2_control" params="name use_mock_hardware serial_port baud_rate">
+
+    <ros2_control name="${name}" type="system">
+      
+      <!-- ========================================== -->
+      <!-- TRƯỜNG HỢP 1: MOCK HARDWARE (SIMULATION) -->
+      <!-- ========================================== -->
+      <xacro:if value="${use_mock_hardware}">
+        <hardware>
+          <plugin>mock_components/GenericSystem</plugin>
+          <param name="calculate_dynamics">true</param>
+        </hardware>
+      </xacro:if>
+
+      <!-- ========================================== -->
+      <!-- TRƯỜNG HỢP 2: REAL HARDWARE (ROBOT THẬT) -->
+      <!-- ========================================== -->
+      <xacro:unless value="${use_mock_hardware}">
+        <hardware>
+          <!-- Tên plugin phải trùng với class trong package my_robot_hardware -->
+          <plugin>my_robot_hardware/RobotSystem</plugin> 
+          <param name="device">${serial_port}</param>
+          <param name="baud_rate">${baud_rate}</param>
+        </hardware>
+      </xacro:unless>
+
+      <!-- KHAI BÁO JOINT (Dùng chung cho cả 2 trường hợp) -->
+      <joint name="Link_1_joint"><command_interface name="velocity"/><state_interface name="position"/><state_interface name="velocity"/></joint>
+      <joint name="Link_2_joint"><command_interface name="velocity"/><state_interface name="position"/><state_interface name="velocity"/></joint>
+      <joint name="Link_3_joint"><command_interface name="velocity"/><state_interface name="position"/><state_interface name="velocity"/></joint>
+      <joint name="Link_4_joint"><command_interface name="velocity"/><state_interface name="position"/><state_interface name="velocity"/></joint>
+      <joint name="Link_5_joint"><command_interface name="velocity"/><state_interface name="position"/><state_interface name="velocity"/></joint>
+      <joint name="Link_6_joint"><command_interface name="velocity"/><state_interface name="position"/><state_interface name="velocity"/></joint>
+      
+      <joint name="gripper_right_joint">
+        <command_interface name="position"/>
+        <state_interface name="position"/>
+        <state_interface name="velocity"/>
+      </joint>
+
+    </ros2_control>
+
+  </xacro:macro>
+
+</robot>

@@ -1,94 +1,182 @@
 import os
+
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import RegisterEventHandler, DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, RegisterEventHandler, ExecuteProcess
+from launch.substitutions import (
+    Command,
+    FindExecutable,
+    LaunchConfiguration,
+    PathJoinSubstitution,
+)
 from launch.event_handlers import OnProcessExit
-from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.substitutions import FindPackageShare
+from launch_ros.parameter_descriptions import ParameterValue
+
 
 def generate_launch_description():
-    # 1. Định nghĩa tên Package
-    description_pkg = 'my_arm_robot'
-    controllers_pkg = 'my_robot_controllers'
 
-    # 2. Lấy đường dẫn file
-    # URDF (trong package robot)
-    urdf_file = os.path.join(get_package_share_directory(description_pkg), 'urdf', 'robot.urdf')
-    
-    # Config (trong package my_robot_controllers)
-    # Nếu bạn muốn để config trong package robot thì sửa đường dẫn lại tại đây
-    controller_config = os.path.join(get_package_share_directory(controllers_pkg), 'config', 'controllers.yaml')
+    # =========================================================
+    # 1. Launch Arguments
+    # =========================================================
+    declared_arguments = []
 
-    # RViz config
-    rviz_config = os.path.join(get_package_share_directory(description_pkg), 'rviz', 'default.rviz')
+    declared_arguments.append(
+        DeclareLaunchArgument(
+            "use_mock_hardware",
+            default_value="true",
+            description="True: Run mock hardware. False: Run real robot.",
+        )
+    )
 
-    # 3. Đọc nội dung URDF
-    with open(urdf_file, 'r') as infp:
-        robot_desc = infp.read()
-    
-    # 4. Tạo các Node
+    declared_arguments.append(
+        DeclareLaunchArgument(
+            "serial_port",
+            default_value="/dev/ttyUSB0",
+            description="Serial port for real robot hardware.",
+        )
+    )
 
-    # A. Controller Manager (Core: Chạy Mock Hardware)
+    declared_arguments.append(
+        DeclareLaunchArgument(
+            "baud_rate",
+            default_value="115200",
+            description="Baudrate for serial communication.",
+        )
+    )
+    declared_arguments.append(DeclareLaunchArgument("launch_gui", default_value="true"))
+    gui_pkg_path = os.path.join(
+        get_package_share_directory('robot_gui') # Thay 'robot_gui' bằng tên package thật của bạn
+    )
+    gui_script_path = os.path.join(gui_pkg_path, 'main.py')
+    # =========================================================
+    # 2. XACRO -> robot_description
+    # =========================================================
+    robot_description_content = Command(
+        [
+            PathJoinSubstitution([FindExecutable(name="xacro")]),
+            " ",
+            PathJoinSubstitution(
+                [FindPackageShare("my_arm_robot"), "urdf", "robot.urdf.xacro"]
+            ),
+            " ",
+            "use_mock_hardware:=", LaunchConfiguration("use_mock_hardware"),
+            " ",
+            "serial_port:=", LaunchConfiguration("serial_port"),
+            " ",
+            "baud_rate:=", LaunchConfiguration("baud_rate"), # THÊM DÒNG NÀY
+        ]
+    )
+
+    robot_description = {
+        "robot_description": ParameterValue(
+            robot_description_content,
+            value_type=str,
+        )
+    }
+
+    # =========================================================
+    # 3. Controller configuration
+    # =========================================================
+    controller_config = PathJoinSubstitution(
+        [
+            FindPackageShare("my_robot_controllers"),
+            "config",
+            "controllers.yaml",
+        ]
+    )
+
+    # =========================================================
+    # 4. RViz config
+    # =========================================================
+    rviz_config_file = PathJoinSubstitution(
+        [
+            FindPackageShare("my_arm_robot"),
+            "rviz",
+            "default.rviz",
+        ]
+    )
+
+    # =========================================================
+    # 5. Nodes
+    # =========================================================
+
+    # A. ros2_control (Controller Manager)
     control_node = Node(
         package="controller_manager",
         executable="ros2_control_node",
-        parameters=[
-            {'robot_description': robot_desc},
-            controller_config
-        ],
         output="screen",
+        parameters=[
+            robot_description,
+            controller_config,
+        ],
     )
 
-    # B. Robot State Publisher (Tính toán TF, publish robot_description cho RViz)
-    robot_state_pub_node = Node(
+    # B. Robot State Publisher
+    robot_state_publisher_node = Node(
         package="robot_state_publisher",
         executable="robot_state_publisher",
         output="both",
-        parameters=[{'robot_description': robot_desc}],
+        parameters=[robot_description],
     )
 
-    # C. RViz2
+    # C. RViz
     rviz_node = Node(
         package="rviz2",
         executable="rviz2",
         name="rviz2",
         output="log",
-        arguments=['-d', rviz_config],
+        arguments=["-d", rviz_config_file],
     )
+    # D. GUI Python Process
+    gui_node = ExecuteProcess(
+        cmd=['python3', gui_script_path],
+        cwd=gui_pkg_path, # Rất quan trọng để tìm thấy các module tabs, shm_manager
+        output='screen',
+        condition=None # Có thể thêm logic IfCondition(LaunchConfiguration("launch_gui"))
+    )
+    # =========================================================
+    # 6. Controller Spawners
+    # =========================================================
 
-    # D. Spawner: Joint State Broadcaster (Bắt buộc để có feedback vị trí)
-    joint_state_broadcaster = Node(
+    # Joint State Broadcaster (BẮT BUỘC)
+    joint_state_broadcaster_spawner = Node(
         package="controller_manager",
         executable="spawner",
         arguments=["joint_state_broadcaster"],
+        output="screen",
     )
 
-    # E. Spawner: Custom Controller của bạn
-    # Lưu ý: Tên "my_cartesian_controller" phải khớp trong file controllers.yaml
-    cartesian_controller = Node(
+    # Custom Cartesian Controller
+    cartesian_controller_spawner = Node(
         package="controller_manager",
         executable="spawner",
         arguments=["my_cartesian_controller"],
+        output="screen",
     )
-    # gripper_controller_spawner = Node(
-    #     package="controller_manager",
-    #     executable="spawner",
-    #     arguments=["gripper_controller"],
-    # )
-    # 5. Xử lý thứ tự chạy (Delay)
-    # Chạy cartesian_controller SAU KHI joint_state_broadcaster đã chạy xong
-    delay_controller = RegisterEventHandler(
+
+    # =========================================================
+    # 7. Controller startup order
+    # =========================================================
+    delay_cartesian_controller = RegisterEventHandler(
         event_handler=OnProcessExit(
-            target_action=joint_state_broadcaster,
-            on_exit=[cartesian_controller],
+            target_action=joint_state_broadcaster_spawner,
+            on_exit=[cartesian_controller_spawner],
         )
     )
 
-    return LaunchDescription([
-        control_node,
-        robot_state_pub_node,
-        rviz_node,
-        joint_state_broadcaster,
-        # gripper_controller_spawner,
-        delay_controller,
-    ])
+    # =========================================================
+    # 8. Launch Description
+    # =========================================================
+    return LaunchDescription(
+        declared_arguments
+        + [
+            control_node,
+            robot_state_publisher_node,
+            rviz_node,
+            joint_state_broadcaster_spawner,
+            delay_cartesian_controller,
+            gui_node,
+        ]
+    )

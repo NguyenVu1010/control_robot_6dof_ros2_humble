@@ -1,0 +1,9 @@
+<library path="my_robot_hardware">
+  <class name="my_robot_hardware/RobotSystem"
+         type="my_robot_hardware::RobotSystem"
+         base_class_type="hardware_interface::SystemInterface">
+    <description>
+      Giao tiếp Serial tốc độ cao cho robot thật 6DOF + Gripper.
+    </description>
+  </class>
+</library>
