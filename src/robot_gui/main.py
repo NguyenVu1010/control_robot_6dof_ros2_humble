@@ -136,13 +136,17 @@ class RobotGUI(QMainWindow):
             self.monitor.update_display(fb)
             self.last_fb_pose = list(fb['pose']) 
             
+            # --- LOGIC FIX: KIỂM TRA JOGGING ---
+            # manual_vel được cập nhật từ các nút nhấn bên Manual Tab
+            is_jogging = any(abs(v) > 1e-6 for v in self.manual_vel)
+
             # --- LOGIC FIX: AUTO-SYNC TARGET ---
-            # Nếu hệ thống đang tắt, HOẶC đang ở chế độ Joint/Trajectory
-            # Thì phải cập nhật Target liên tục theo thực tế để khi chuyển về Pose không bị sốc.
-            if not self.is_active or self.current_mode != MODE_POSE:
+            # Đồng bộ target khi: Hệ thống tắt, Đang Jogging, hoặc đang ở mode Joint.
+            # Điều này giúp robot "chốt" vị trí ngay khi ngừng điều khiển tay.
+            if not self.is_active or is_jogging or self.current_mode == MODE_JOINT:
                 self.target_pos = self.last_fb_pose[:3]
                 self.target_rpy = self.last_fb_pose[3:]
-                # Cập nhật giá trị hiển thị lên các ô SpinBox ở tab Pose
+                # Cập nhật số liệu hiển thị lên màn hình (SpinBox)
                 self.tabs.pose_tab.update_ui_values(self.target_pos, self.target_rpy)
 
             # Tính toán sai số
@@ -150,7 +154,7 @@ class RobotGUI(QMainWindow):
                 sum((self.target_pos[i] - self.last_fb_pose[i])**2 for i in range(3))
             )
 
-            # Cập nhật Label trạng thái
+            # Cập nhật Label trạng thái (Giữ nguyên cấu trúc file cũ)
             if self.is_active:
                 if self.current_error > MAX_ALLOWED_ERROR:
                     self.status_label.setText(f"⚠️ LIMIT REACHED! Error: {self.current_error:.3f}m")
@@ -175,18 +179,20 @@ class RobotGUI(QMainWindow):
                 if mgr.current_idx >= len(mgr.steps):
                     mgr.is_running = False; self.tabs.seq_tab.btn_run.setText("RUN SEQUENCE")
 
-        # Xác định Control Mode dựa trên tab đang chọn
+        # Xác định Control Mode (Bám sát file cũ, chỉ sửa điều kiện chuyển mode)
         if self.is_active and not mgr.is_running:
-            # Nếu đang chạy trajectory (về home) thì giữ nguyên mode cho đến khi gần đích
-            if self.current_mode == MODE_TRAJECTORY:
-                if self.current_error < 0.002:
-                    self.current_mode = MODE_POSE
+            is_jogging = any(abs(v) > 1e-6 for v in self.manual_vel)
+            
+            # Nếu đang Jogging hoặc đang thực hiện Go Home
+            if is_jogging or (self.current_mode == MODE_TRAJECTORY and self.current_error > 0.002):
+                self.current_mode = MODE_TRAJECTORY
             else:
-                # Chuyển mode dựa trên tab
-                if self.tabs.currentIndex() == 2: # Giả sử Tab 2 là Joint Manual
+                if self.tabs.currentIndex() == 2: # Tab Joint Manual
                     self.current_mode = MODE_JOINT
                 else:
                     self.current_mode = MODE_POSE
+                    # Ở MODE_POSE, target_pos sẽ do các SpinBox trong PoseTab tự cập nhật vào self.target_pos
+                    # (Nhờ hàm sync ở trên, các SpinBox này đã được cập nhật giá trị mới nhất rồi)
 
         # Ghi dữ liệu xuống SHM
         self.shm.write_command(self.is_active, self.current_mode, self.target_pos, 

@@ -564,7 +564,17 @@
       multiplier="-1"
       offset="0" />
   </joint>
-  <link name="tool_center_point" />
+  <link name="tool_center_point">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.005"/>  <!-- 5mm, chỉnh nhỏ hơn nếu muốn -->
+      </geometry>
+      <material name="red">
+        <color rgba="1 0 0 1"/>
+      </material>
+    </visual>
+  </link>
 
   <joint name="tcp_joint" type="fixed">
     <parent link="Link_6"/>
@@ -572,6 +582,6 @@
     <!-- QUAN TRỌNG: Cần chỉnh xyz và rpy ở đây -->
     <!-- Giả sử kẹp dài khoảng 15cm (0.15m) dọc theo trục Z của Link_6 -->
     <!-- Bạn cần đo thực tế từ mặt bích Link_6 đến điểm giữa 2 đầu ngón tay -->
-    <origin xyz="0 0 0.1" rpy="0 0 0"/> 
+    <origin xyz="0 0.01 0.11" rpy="0 0 0"/> 
   </joint>
 </robot>
