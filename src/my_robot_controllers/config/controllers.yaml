@@ -10,9 +10,6 @@ controller_manager:
     my_cartesian_controller:
       type: my_robot_controllers/CartesianVelocityController
 
-    # 3. Gripper Controller: Điều khiển vị trí đơn giản
-    # gripper_controller:
-    #   type: joint_trajectory_controller/JointTrajectoryController
 
 # --- CẤU HÌNH CHI TIẾT ---
 

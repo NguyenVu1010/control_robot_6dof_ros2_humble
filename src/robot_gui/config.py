@@ -19,3 +19,4 @@ MODE_TRAJECTORY = 2
 MODE_JOINT = 3
 
 COORD_KEYS = ["X", "Y", "Z", "Roll", "Pitch", "Yaw"]
+MAX_ALLOWED_ERROR = 0.05
