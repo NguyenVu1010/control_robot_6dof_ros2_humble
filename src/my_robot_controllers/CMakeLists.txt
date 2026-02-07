@@ -13,11 +13,14 @@ find_package(hardware_interface REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(realtime_tools REQUIRED)
 find_package(Eigen3 REQUIRED)
-
+find_package(nav_msgs REQUIRED)
+find_package(urdf REQUIRED)
+find_package(angles REQUIRED)
 # --- 1. TÌM THƯ VIỆN MỚI ---
 find_package(simple_kinematics_lib REQUIRED)
 find_package(simple_trajectory_lib REQUIRED)
-
+find_package(visualization_msgs REQUIRED)
+find_package(ompl REQUIRED)
 # --- 2. TẠO THƯ VIỆN CONTROLLER ---
 add_library(cartesian_velocity_controller SHARED
   src/cartesian_velocity_controller.cpp
@@ -29,9 +32,16 @@ target_include_directories(cartesian_velocity_controller PUBLIC
   $<INSTALL_INTERFACE:include>
   ${EIGEN3_INCLUDE_DIR}
 )
-
+target_include_directories(cartesian_velocity_controller PRIVATE
+  include
+  /opt/ros/humble/include/ompl-1.7
+)
 # Link thư viện Realtime (cho shm_open)
-target_link_libraries(cartesian_velocity_controller rt)
+target_link_libraries(cartesian_velocity_controller rt
+  ompl::ompl
+  urdf::urdf
+  angles::angles
+)
 
 # --- 3. LIÊN KẾT DEPENDENCY ---
 ament_target_dependencies(cartesian_velocity_controller
@@ -42,6 +52,8 @@ ament_target_dependencies(cartesian_velocity_controller
   geometry_msgs
   realtime_tools
   Eigen3
+  nav_msgs
+  visualization_msgs
   simple_kinematics_lib  # <--- Link Lib Kinematics
   simple_trajectory_lib  # <--- Link Lib Trajectory
 )

@@ -94,7 +94,7 @@ def generate_launch_description():
         [
             FindPackageShare("my_arm_robot"),
             "rviz",
-            "default.rviz",
+            "rviz1.rviz",
         ]
     )
 

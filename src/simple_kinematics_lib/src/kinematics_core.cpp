@@ -113,7 +113,7 @@ bool KinematicsCore::solveIK_Velocity(const JntArray& q, const Vector6d& v_cart,
     
     // Safety clamp (Giới hạn tốc độ khớp)
     double max_speed = 3.0; 
-    for(int i=0; i<n_joints_; ++i) {
+    for(unsigned int i=0; i<n_joints_; ++i) {
         if(q_dot_out(i) > max_speed) q_dot_out(i) = max_speed;
         if(q_dot_out(i) < -max_speed) q_dot_out(i) = -max_speed;
     }

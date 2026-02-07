@@ -27,30 +27,32 @@ class SHMManager:
             return None
 
     def write_command(self, active, mode, pos, rpy, dur, trig, manual_vel, gripper):
-        # Ghi Mode
-        self.shm.seek(OFF_MODE)
-        self.shm.write(struct.pack('i', mode))
-        
-        # Ghi Target
-        self.shm.seek(OFF_TARGET_POS)
-        self.shm.write(struct.pack('3d', *pos))
-        self.shm.seek(OFF_TARGET_RPY)
-        self.shm.write(struct.pack('3d', *rpy))
-        
-        # Ghi Traj Duration & Trigger
-        self.shm.seek(OFF_TRAJ_DUR)
-        self.shm.write(struct.pack('d', dur))
-        self.shm.seek(OFF_TRAJ_TRIG)
-        self.shm.write(struct.pack('i', trig))
-        
-        # Ghi Manual Velocity
-        self.shm.seek(OFF_MANUAL_J)
-        self.shm.write(struct.pack('6d', *manual_vel))
-        
-        # Ghi Gripper
-        self.shm.seek(OFF_GRIPPER)
-        self.shm.write(struct.pack('d', gripper))
-        
-        # Ghi Active Flag
-        self.shm.seek(OFF_ACTIVE)
-        self.shm.write(struct.pack('?', active))
+        try:
+            # 1. Ghi Mode (4 bytes)
+            self.shm.seek(OFF_MODE)
+            self.shm.write(struct.pack('i', mode))
+            
+            # 2. Ghi Target (Dành cho Pose/Traj)
+            self.shm.seek(OFF_TARGET_POS)
+            self.shm.write(struct.pack('3d', *pos))
+            self.shm.seek(OFF_TARGET_RPY)
+            self.shm.write(struct.pack('3d', *rpy))
+            
+            # 3. GHI VẬN TỐC KHỚP (Dành cho Joint Manual) - QUAN TRỌNG
+            # manual_vel ở đây phải là danh sách 6 số [v1, v2, v3, v4, v5, v6]
+            self.shm.seek(OFF_MANUAL_J)
+            self.shm.write(struct.pack('6d', *manual_vel))
+            
+            # 4. Ghi các thông số khác
+            self.shm.seek(OFF_TRAJ_DUR)
+            self.shm.write(struct.pack('d', float(dur)))
+            self.shm.seek(OFF_TRAJ_TRIG)
+            self.shm.write(struct.pack('i', trig))
+            self.shm.seek(OFF_GRIPPER)
+            self.shm.write(struct.pack('d', float(gripper)))
+            
+            # 5. Ghi Active flag
+            self.shm.seek(OFF_ACTIVE)
+            self.shm.write(struct.pack('?', active))
+        except Exception as e:
+            print(f"SHM Write Error: {e}")

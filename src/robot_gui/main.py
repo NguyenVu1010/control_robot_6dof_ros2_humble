@@ -23,7 +23,11 @@ class RobotGUI(QMainWindow):
         # --- QUẢN LÝ DỮ LIỆU ---
         self.shm = SHMManager()
         self.seq_manager = SequenceManager()
-        
+
+        self.prev_active = False
+        self.prev_jogging = False
+        self.prev_mode = MODE_IDLE
+        self.first_sync_done = False
         # --- CẤU HÌNH VỊ TRÍ HOME ---
         self.HOME_POS = [0.161, 0.000, 0.120] # X, Y, Z
         self.HOME_RPY = [0.108, 3.14, -3.14] # R, P, Y
@@ -128,76 +132,116 @@ class RobotGUI(QMainWindow):
         self.status_label.setText("STATUS: RETURNING HOME...")
 
     def loop(self):
+        # 1. KẾT NỐI & ĐỌC FEEDBACK
         if not self.shm.shm:
             if not self.shm.connect(): return
-
         fb = self.shm.read_feedback()
-        if fb:
-            self.monitor.update_display(fb)
-            self.last_fb_pose = list(fb['pose']) 
-            
-            # --- LOGIC FIX: KIỂM TRA JOGGING ---
-            # manual_vel được cập nhật từ các nút nhấn bên Manual Tab
-            is_jogging = any(abs(v) > 1e-6 for v in self.manual_vel)
+        if not fb: return
 
-            # --- LOGIC FIX: AUTO-SYNC TARGET ---
-            # Đồng bộ target khi: Hệ thống tắt, Đang Jogging, hoặc đang ở mode Joint.
-            # Điều này giúp robot "chốt" vị trí ngay khi ngừng điều khiển tay.
-            if not self.is_active or is_jogging or self.current_mode == MODE_JOINT:
-                self.target_pos = self.last_fb_pose[:3]
-                self.target_rpy = self.last_fb_pose[3:]
-                # Cập nhật số liệu hiển thị lên màn hình (SpinBox)
-                self.tabs.pose_tab.update_ui_values(self.target_pos, self.target_rpy)
+        # Cập nhật hiển thị và lưu tọa độ thực tế
+        self.monitor.update_display(fb)
+        self.last_fb_pose = list(fb['pose'])
 
-            # Tính toán sai số
-            self.current_error = math.sqrt(
-                sum((self.target_pos[i] - self.last_fb_pose[i])**2 for i in range(3))
-            )
+        # 2. XÁC ĐỊNH CHẾ ĐỘ DỰA TRÊN TAB HIỆN TẠI (Source of Truth)
+        # Giả sử: Tab 0 = Pose, Tab 1 = Trajectory, Tab 2 = Joint
+        tab_index = self.tabs.currentIndex()
+        
+        if not self.is_active:
+            new_mode = MODE_IDLE
+        elif tab_index == 0:
+            new_mode = MODE_POSE
+        elif tab_index == 1:
+            new_mode = MODE_TRAJECTORY
+        elif tab_index == 2:
+            new_mode = MODE_JOINT
+        else:
+            new_mode = MODE_IDLE
 
-            # Cập nhật Label trạng thái (Giữ nguyên cấu trúc file cũ)
-            if self.is_active:
-                if self.current_error > MAX_ALLOWED_ERROR:
-                    self.status_label.setText(f"⚠️ LIMIT REACHED! Error: {self.current_error:.3f}m")
-                    self.status_label.setStyleSheet("background-color: #D32F2F; color: white; font-weight: bold;")
-                elif "RETURNING HOME" not in self.status_label.text():
-                    self.status_label.setText("SYSTEM ACTIVE - RUNNING")
-                    self.status_label.setStyleSheet("background-color: #2E7D32; color: white; font-weight: bold;")
-            else:
-                self.status_label.setText("IDLE - STANDBY")
-                self.status_label.setStyleSheet("background-color: #212121; color: white;")
+        # 3. LẤY DỮ LIỆU TƯƠNG ỨNG VỚI MODE ĐANG CHỌN
+        # Reset vận tốc manual về 0 trước khi lấy dữ liệu mới
+        current_manual_vel = [0.0] * 6
+        
+        if new_mode == MODE_JOINT:
+            # Chỉ lấy vận tốc khớp khi đang ở Tab Joint
+            current_manual_vel = self.tabs.joint_tab.get_velocities()
+        elif new_mode == MODE_TRAJECTORY:
+            # Nếu có nút Jogging bên Tab Trajectory/Pose thì lấy ở đó (tùy GUI của bạn)
+            # Ở đây tôi ví dụ lấy manual_vel từ thuộc tính chung
+            current_manual_vel = self.manual_vel 
 
-        # Chế độ điều khiển tự động (Sequence)
-        mgr = self.seq_manager
-        if self.is_active and mgr.is_running:
-            step = mgr.steps[mgr.current_idx]
-            self.target_pos, self.target_rpy = step['pos'], step['rpy']
-            self.cmd_gripper, self.traj_duration = step['grip'], step['dur']
+        # 4. LOGIC ĐỒNG BỘ (SYNC)
+        # Đồng bộ khi: Mới mở máy, Chuyển từ Joint sang Pose, Chuyển từ Traj sang Pose
+        need_sync = False
+        if not self.first_sync_done: 
+            need_sync = True
+            self.first_sync_done = True
+
+        if self.is_active and not self.prev_active: 
+            need_sync = True
+
+        # Khi đang ở mode Joint hoặc vừa thoát khỏi Trajectory/Joint để về Pose
+        if new_mode == MODE_JOINT or (new_mode == MODE_POSE and self.prev_mode != MODE_POSE):
+            need_sync = True
+
+        if need_sync:
+            self.target_pos = self.last_fb_pose[:3]
+            self.target_rpy = self.last_fb_pose[3:]
             self.tabs.pose_tab.update_ui_values(self.target_pos, self.target_rpy)
+
+        # Cập nhật các biến trạng thái chính
+        self.current_mode = new_mode
+        self.manual_vel = current_manual_vel # Cập nhật mảng vận tốc cuối cùng
+        
+        self.current_error = math.sqrt(sum((self.target_pos[i] - self.last_fb_pose[i])**2 for i in range(3)))
+
+        # 5. XỬ LÝ ĐẶC BIỆT CHO MODE TRAJECTORY (Sequence)
+        if self.current_mode == MODE_TRAJECTORY and self.seq_manager.is_running:
+            mgr = self.seq_manager
+            step = mgr.steps[mgr.current_idx]
+            self.target_pos = step['pos']
+            self.target_rpy = step['rpy']
+            self.cmd_gripper = step['grip']
+            self.traj_duration = step['dur']
+            self.tabs.pose_tab.update_ui_values(self.target_pos, self.target_rpy)
+            
             mgr.timer_count += 0.03
             if mgr.timer_count >= self.traj_duration:
                 mgr.timer_count = 0; mgr.current_idx += 1; self.traj_trigger += 1
                 if mgr.current_idx >= len(mgr.steps):
-                    mgr.is_running = False; self.tabs.seq_tab.btn_run.setText("RUN SEQUENCE")
+                    mgr.is_running = False
 
-        # Xác định Control Mode (Bám sát file cũ, chỉ sửa điều kiện chuyển mode)
-        if self.is_active and not mgr.is_running:
-            is_jogging = any(abs(v) > 1e-6 for v in self.manual_vel)
-            
-            # Nếu đang Jogging hoặc đang thực hiện Go Home
-            if is_jogging or (self.current_mode == MODE_TRAJECTORY and self.current_error > 0.002):
-                self.current_mode = MODE_TRAJECTORY
-            else:
-                if self.tabs.currentIndex() == 2: # Tab Joint Manual
-                    self.current_mode = MODE_JOINT
-                else:
-                    self.current_mode = MODE_POSE
-                    # Ở MODE_POSE, target_pos sẽ do các SpinBox trong PoseTab tự cập nhật vào self.target_pos
-                    # (Nhờ hàm sync ở trên, các SpinBox này đã được cập nhật giá trị mới nhất rồi)
+        # 6. GHI XUỐNG SHARED MEMORY (Đúng Offset)
+        self.shm.write_command(
+            self.is_active, 
+            self.current_mode, 
+            self.target_pos, 
+            self.target_rpy, 
+            self.traj_duration, 
+            self.traj_trigger, 
+            self.manual_vel, 
+            self.cmd_gripper
+        )
 
-        # Ghi dữ liệu xuống SHM
-        self.shm.write_command(self.is_active, self.current_mode, self.target_pos, 
-                               self.target_rpy, self.traj_duration, self.traj_trigger, 
-                               self.manual_vel, self.cmd_gripper)
+        # 7. LƯU TRẠNG THÁI
+        self.prev_active = self.is_active
+        self.prev_mode = self.current_mode
+        self.refresh_status_ui()
+
+    def refresh_status_ui(self):
+        """Hàm phụ trợ cập nhật màu sắc và thông báo trạng thái"""
+        if not self.is_active:
+            self.status_label.setText("IDLE - STANDBY")
+            self.status_label.setStyleSheet("background-color: #212121; color: white;")
+            return
+
+        if self.current_error > MAX_ALLOWED_ERROR:
+            self.status_label.setText(f"⚠️ LIMIT REACHED! Error: {self.current_error:.3f}m")
+            self.status_label.setStyleSheet("background-color: #D32F2F; color: white; font-weight: bold;")
+        else:
+            mode_map = {MODE_POSE: "POSE", MODE_TRAJECTORY: "TRAJECTORY", MODE_JOINT: "JOINT"}
+            mode_str = mode_map.get(self.current_mode, "UNKNOWN")
+            self.status_label.setText(f"SYSTEM ACTIVE - MODE: {mode_str}")
+            self.status_label.setStyleSheet("background-color: #2E7D32; color: white; font-weight: bold;")
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
