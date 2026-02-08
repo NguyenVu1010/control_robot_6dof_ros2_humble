@@ -9,7 +9,7 @@ sudo apt install -y ros-humble-ros2-control ros-humble-ros2-controllers \
      ros-humble-joint-state-broadcaster ros-humble-visualization-msgs
 
 echo "Installing Python Dependencies..."
-pip3 install PyQt6 pyserial
+pip3 install PyQt6 pyserial posix_ipc
 
 echo "Adding user to dialout group for Serial access..."
 sudo usermod -a -G dialout $USER

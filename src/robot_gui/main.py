@@ -1,11 +1,12 @@
 import sys
 import os
 import math
+import time
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QHBoxLayout, 
                              QVBoxLayout, QPushButton, QSlider, QLabel, QGroupBox)
 from PyQt6.QtCore import QTimer, Qt
 
-# Đảm bảo Python tìm thấy các module
+# Đảm bảo Python tìm thấy các module trong thư mục hiện tại
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from shm_manager import SHMManager
@@ -17,34 +18,37 @@ from config import *
 class RobotGUI(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Robot Modular Interface - Full Control")
-        self.resize(1200, 850)
+        self.setWindowTitle("Robot Modular Interface - Professional Control")
+        self.resize(1300, 850)
         
-        # --- QUẢN LÝ DỮ LIỆU ---
+        # --- QUẢN LÝ DỮ LIỆU & MODULE ---
         self.shm = SHMManager()
         self.seq_manager = SequenceManager()
         
-        # --- CẤU HÌNH VỊ TRÍ HOME ---
-        self.HOME_POS = [0.161, 0.000, 0.120] # X, Y, Z
-        self.HOME_RPY = [0.108, 3.14, -3.14] # R, P, Y
+        # --- CẤU HÌNH VỊ TRÍ ---
+        self.HOME_POS = [0.161, 0.000, 0.120]
+        self.HOME_RPY = [0.108, 3.14, -3.14]
         
-        # --- TRẠNG THÁI NỘI BỘ ---
+        # --- TRẠNG THÁI ĐIỀU KHIỂN (GỬI XUỐNG ROBOT) ---
         self.is_active = False
-        self.current_mode = MODE_POSE
-        self.target_pos = [0.0]*3
-        self.target_rpy = [0.0]*3
-        self.traj_duration = 4.0
+        self.current_mode = MODE_IDLE
+        self.target_pos = [0.0] * 3
+        self.target_rpy = [0.0] * 3
+        self.ee_vel = [0.0] * 6     # [vx, vy, vz, wx, wy, wz]
+        self.manual_vel = [0.0] * 6 # [j1, j2, j3, j4, j5, j6]
+        self.traj_duration = 3.0
         self.traj_trigger = 0
-        self.manual_vel = [0.0]*6
         self.cmd_gripper = 0.0 
 
-        self.is_stuck = False
-        self.current_error = 0.0
-        self.last_fb_pose = [0.0] * 6 # Lưu Feedback: [X, Y, Z, R, P, Y]
+        # --- TRẠNG THÁI PHẢN HỒI & LOGIC ---
+        self.last_fb_pose = [0.0] * 6
+        self.last_is_active = False
+        self.last_jogging_state = False 
+        self.is_initialized = False # Cờ để thực hiện đồng bộ vị trí ngay khi bật app
 
-        self.status_label = None 
         self.init_ui()
         
+        # --- TIMER VÒNG LẶP CHÍNH (30ms) ---
         self.timer = QTimer()
         self.timer.timeout.connect(self.loop)
         self.timer.start(30)
@@ -55,52 +59,53 @@ class RobotGUI(QMainWindow):
         master_layout = QVBoxLayout(central)
         content_layout = QHBoxLayout()
         
-        # 1. Panel bên trái: Feedback
+        # Monitor Panel (Bên trái)
         self.monitor = MonitorPanel()
         content_layout.addWidget(self.monitor, 4)
         
-        # 2. Panel bên phải: Control
+        # Control Panel (Bên phải)
         right_panel = QVBoxLayout()
         
-        top_btns_layout = QHBoxLayout()
+        top_btns = QHBoxLayout()
         self.btn_active = QPushButton("ENABLE CONTROL")
         self.btn_active.setCheckable(True)
-        self.btn_active.setMinimumHeight(50)
+        self.btn_active.setMinimumHeight(55)
         self.btn_active.clicked.connect(self.toggle_active)
         
         self.btn_home = QPushButton("GO HOME")
-        self.btn_home.setMinimumHeight(50)
+        self.btn_home.setMinimumHeight(55)
         self.btn_home.setStyleSheet("background-color: #0277BD; color: white; font-weight: bold;")
         self.btn_home.clicked.connect(self.go_home)
         
-        top_btns_layout.addWidget(self.btn_active, 7)
-        top_btns_layout.addWidget(self.btn_home, 3)
-        right_panel.addLayout(top_btns_layout)
+        top_btns.addWidget(self.btn_active, 7)
+        top_btns.addWidget(self.btn_home, 3)
+        right_panel.addLayout(top_btns)
 
-        # Gripper Control
+        # Gripper
         grip_gb = QGroupBox("Gripper Control")
-        grip_layout = QHBoxLayout()
+        grip_l = QHBoxLayout()
         self.grip_slider = QSlider(Qt.Orientation.Horizontal)
         self.grip_slider.setRange(0, 100) 
         self.grip_slider.setValue(0)
         self.grip_slider.setEnabled(False) 
         self.grip_slider.valueChanged.connect(self.on_gripper_change)
-        grip_layout.addWidget(QLabel("Open"))
-        grip_layout.addWidget(self.grip_slider)
-        grip_layout.addWidget(QLabel("Close"))
-        grip_gb.setLayout(grip_layout)
+        grip_l.addWidget(QLabel("Open"))
+        grip_l.addWidget(self.grip_slider)
+        grip_l.addWidget(QLabel("Close"))
+        grip_gb.setLayout(grip_l)
         right_panel.addWidget(grip_gb)
 
-        # Tabs điều khiển
+        # Tabs
         self.tabs = ControlTabs(self)
         right_panel.addWidget(self.tabs)
         content_layout.addLayout(right_panel, 3)
         
         master_layout.addLayout(content_layout)
 
-        self.status_label = QLabel("SYSTEM READY")
+        # Status Label
+        self.status_label = QLabel("SYSTEM STANDBY")
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.status_label.setMinimumHeight(40)
+        self.status_label.setMinimumHeight(45)
         self.status_label.setStyleSheet("background-color: #212121; color: white; font-weight: bold;")
         master_layout.addWidget(self.status_label)
 
@@ -123,9 +128,7 @@ class RobotGUI(QMainWindow):
         self.target_rpy = list(self.HOME_RPY)
         self.tabs.pose_tab.update_ui_values(self.target_pos, self.target_rpy)
         self.current_mode = MODE_TRAJECTORY
-        self.traj_duration = 3.0
         self.traj_trigger += 1
-        self.status_label.setText("STATUS: RETURNING HOME...")
 
     def loop(self):
         if not self.shm.shm:
@@ -136,70 +139,108 @@ class RobotGUI(QMainWindow):
             self.monitor.update_display(fb)
             self.last_fb_pose = list(fb['pose']) 
             
-            # --- LOGIC FIX: KIỂM TRA JOGGING ---
-            # manual_vel được cập nhật từ các nút nhấn bên Manual Tab
-            is_jogging = any(abs(v) > 1e-6 for v in self.manual_vel)
-
-            # --- LOGIC FIX: AUTO-SYNC TARGET ---
-            # Đồng bộ target khi: Hệ thống tắt, Đang Jogging, hoặc đang ở mode Joint.
-            # Điều này giúp robot "chốt" vị trí ngay khi ngừng điều khiển tay.
-            if not self.is_active or is_jogging or self.current_mode == MODE_JOINT:
+            # 1. FIX KHỞI TẠO: Đồng bộ vị trí Robot thực vào GUI ngay khi vừa mở app
+            if not self.is_initialized:
                 self.target_pos = self.last_fb_pose[:3]
                 self.target_rpy = self.last_fb_pose[3:]
-                # Cập nhật số liệu hiển thị lên màn hình (SpinBox)
+                self.tabs.pose_tab.update_ui_values(self.target_pos, self.target_rpy)
+                self.is_initialized = True
+
+            # 2. LẤY VẬN TỐC EE TỪ TAB (Dạng phẳng 6 số)
+            current_ee_vel = self.tabs.vel_tab.get_current_vel()
+            
+            # 3. KIỂM TRA TRẠNG THÁI JOGGING
+            # Gộp manual_vel (joint) và ee_vel để kiểm tra xem có bất kỳ chuyển động tay nào không
+            combined_vels = self.manual_vel + current_ee_vel
+            is_jogging = any(abs(v) > 1e-6 for v in combined_vels)
+
+            # 4. FIX TARGET BÁM THEO ROBOT (Jog Follow)
+            # Khi đang Jog, Robot di chuyển -> Cập nhật liên tục Target = Vị trí hiện tại
+            # Để khi dừng (nhả nút), robot đứng yên tại chỗ, không bị kéo về tọa độ cũ.
+            if is_jogging:
+                self.target_pos = self.last_fb_pose[:3]
+                self.target_rpy = self.last_fb_pose[3:]
+                # Đồng bộ UI liên tục để người dùng thấy tọa độ nhảy theo robot
                 self.tabs.pose_tab.update_ui_values(self.target_pos, self.target_rpy)
 
-            # Tính toán sai số
-            self.current_error = math.sqrt(
-                sum((self.target_pos[i] - self.last_fb_pose[i])**2 for i in range(3))
-            )
+            # Đồng bộ UI khi Standby hoặc vừa thả nút Jogging
+            elif not self.is_active or (not is_jogging and self.last_jogging_state):
+                self.tabs.pose_tab.update_ui_values(self.last_fb_pose[:3], self.last_fb_pose[3:])
+            
+            self.last_jogging_state = is_jogging
+            self.last_is_active = self.is_active
 
-            # Cập nhật Label trạng thái (Giữ nguyên cấu trúc file cũ)
+            # 5. QUẢN LÝ MODE THEO TAB
             if self.is_active:
-                if self.current_error > MAX_ALLOWED_ERROR:
-                    self.status_label.setText(f"⚠️ LIMIT REACHED! Error: {self.current_error:.3f}m")
-                    self.status_label.setStyleSheet("background-color: #D32F2F; color: white; font-weight: bold;")
-                elif "RETURNING HOME" not in self.status_label.text():
-                    self.status_label.setText("SYSTEM ACTIVE - RUNNING")
-                    self.status_label.setStyleSheet("background-color: #2E7D32; color: white; font-weight: bold;")
+                tab_idx = self.tabs.currentIndex() # 0: Cartesian, 1: Seq, 2: Joint, 3: Velocity
+
+                if self.seq_manager.is_running:
+                    # Sequence Mode
+                    step = self.seq_manager.steps[self.seq_manager.current_idx]
+                    self.target_pos, self.target_rpy = step['pos'], step['rpy']
+                    self.cmd_gripper, self.traj_duration = step['grip'], step['dur']
+                    self.tabs.pose_tab.update_ui_values(self.target_pos, self.target_rpy)
+                    self.current_mode = MODE_TRAJECTORY
+                    
+                    self.seq_manager.timer_count += 0.03
+                    if self.seq_manager.timer_count >= self.traj_duration:
+                        self.seq_manager.timer_count = 0
+                        self.seq_manager.current_idx += 1
+                        self.traj_trigger += 1
+                        if self.seq_manager.current_idx >= len(self.seq_manager.steps):
+                            self.seq_manager.is_running = False
+                            self.tabs.seq_tab.btn_run.setText("RUN SEQUENCE")
+                
+                elif any(abs(v) > 1e-6 for v in self.manual_vel):
+                    # Ưu tiên Mode Joint nếu đang nhấn nút ở Tab Joint
+                    self.current_mode = MODE_JOINT
+                
+                elif any(abs(v) > 1e-6 for v in current_ee_vel):
+                    # Ưu tiên Mode Velocity nếu đang nhấn nút ở Tab Velocity
+                    self.current_mode = MODE_TRAJECTORY
+                    self.ee_vel = current_ee_vel
+                
+                elif tab_idx == 0:
+                    # Chế độ Cartesian: Chỉ cập nhật target từ SpinBox khi người dùng nhấn nút GO (xử lý trong PoseTab)
+                    # Hoặc nếu muốn robot luôn bám SpinBox thì mở dòng dưới:
+                    # self.target_pos = self.tabs.pose_tab.get_pos()
+                    self.current_mode = MODE_POSE
+                
+                else:
+                    self.current_mode = MODE_POSE
+
+            else:
+                self.current_mode = MODE_IDLE
+
+            # 6. STATUS UI
+            err = math.sqrt(sum((self.target_pos[i] - self.last_fb_pose[i])**2 for i in range(3)))
+            if self.is_active:
+                if err > MAX_ALLOWED_ERROR:
+                    self.status_label.setText(f"⚠️ LIMIT ERROR: {err:.3f}m")
+                    self.status_label.setStyleSheet("background-color: #D32F2F; color: white;")
+                else:
+                    self.status_label.setText(f"ACTIVE - MODE: {self.current_mode}")
+                    self.status_label.setStyleSheet("background-color: #2E7D32; color: white;")
             else:
                 self.status_label.setText("IDLE - STANDBY")
                 self.status_label.setStyleSheet("background-color: #212121; color: white;")
 
-        # Chế độ điều khiển tự động (Sequence)
-        mgr = self.seq_manager
-        if self.is_active and mgr.is_running:
-            step = mgr.steps[mgr.current_idx]
-            self.target_pos, self.target_rpy = step['pos'], step['rpy']
-            self.cmd_gripper, self.traj_duration = step['grip'], step['dur']
-            self.tabs.pose_tab.update_ui_values(self.target_pos, self.target_rpy)
-            mgr.timer_count += 0.03
-            if mgr.timer_count >= self.traj_duration:
-                mgr.timer_count = 0; mgr.current_idx += 1; self.traj_trigger += 1
-                if mgr.current_idx >= len(mgr.steps):
-                    mgr.is_running = False; self.tabs.seq_tab.btn_run.setText("RUN SEQUENCE")
-
-        # Xác định Control Mode (Bám sát file cũ, chỉ sửa điều kiện chuyển mode)
-        if self.is_active and not mgr.is_running:
-            is_jogging = any(abs(v) > 1e-6 for v in self.manual_vel)
-            
-            # Nếu đang Jogging hoặc đang thực hiện Go Home
-            if is_jogging or (self.current_mode == MODE_TRAJECTORY and self.current_error > 0.002):
-                self.current_mode = MODE_TRAJECTORY
-            else:
-                if self.tabs.currentIndex() == 2: # Tab Joint Manual
-                    self.current_mode = MODE_JOINT
-                else:
-                    self.current_mode = MODE_POSE
-                    # Ở MODE_POSE, target_pos sẽ do các SpinBox trong PoseTab tự cập nhật vào self.target_pos
-                    # (Nhờ hàm sync ở trên, các SpinBox này đã được cập nhật giá trị mới nhất rồi)
-
-        # Ghi dữ liệu xuống SHM
-        self.shm.write_command(self.is_active, self.current_mode, self.target_pos, 
-                               self.target_rpy, self.traj_duration, self.traj_trigger, 
-                               self.manual_vel, self.cmd_gripper)
+            # 7. GHI XUỐNG SHARED MEMORY
+            # Tách ee_vel thành lin và ang nếu shm_manager yêu cầu, hoặc gửi cả cục 6
+            self.shm.write_command(
+                active=self.is_active, 
+                mode=self.current_mode, 
+                target_p=self.target_pos, 
+                target_r=self.target_rpy, 
+                dur=self.traj_duration, 
+                trig=self.traj_trigger, 
+                manual_j=self.manual_vel, 
+                gripper=self.cmd_gripper,
+                ee_vel=self.ee_vel if self.current_mode == MODE_TRAJECTORY else [0.0]*6
+            )
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    win = RobotGUI(); win.show()
+    win = RobotGUI()
+    win.show()
     sys.exit(app.exec())

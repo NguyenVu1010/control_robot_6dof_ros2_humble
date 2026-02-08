@@ -61,6 +61,8 @@ private:
   std::shared_ptr<stl::TrajectoryGenerator> traj_gen_;
 
   // --- BIẾN TRẠNG THÁI (Dùng kiểu của thư viện mới) ---
+  int last_mode_ = -1;           // Theo dõi mode ở vòng lặp trước
+  bool last_cmd_active_ = false;
   srk::JntArray q_current_;   // Vị trí khớp hiện tại
   srk::JntArray q_dot_cmd_;   // Vận tốc khớp lệnh
   srk::Vector6d v_target_;    // Vận tốc Cartesian mong muốn (v, w)
