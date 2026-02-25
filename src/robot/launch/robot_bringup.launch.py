@@ -87,6 +87,14 @@ def generate_launch_description():
         ]
     )
 
+    ik_config = PathJoinSubstitution(
+        [
+            FindPackageShare("my_arm_robot"),
+            "config",
+            "ik_config.yaml",
+        ]
+    )
+
     # =========================================================
     # 4. RViz config
     # =========================================================
@@ -110,6 +118,7 @@ def generate_launch_description():
         parameters=[
             robot_description,
             controller_config,
+            ik_config,
         ],
     )
 

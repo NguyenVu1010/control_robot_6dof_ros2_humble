@@ -1,0 +1,24 @@
+# Cấu hình IK cho CartesianVelocityController
+# Có thể tune runtime mà không cần rebuild
+
+my_cartesian_controller:
+  ros__parameters:
+    ik:
+      # SVD per-axis damping
+      sigma_threshold: 0.02       # Ngưỡng singular value bắt đầu damping
+      lambda_max: 0.1             # Damping tối đa cho hướng gần singularity
+
+      # Direction guard (hậu kiểm hướng)
+      direction_cos_threshold: 0.866  # cos(30°), ngưỡng cosine hợp lệ
+      direction_min_scale: 0.1        # Scale tối thiểu khi sai hướng
+
+      # Safety
+      max_joint_speed: 3.0        # Giới hạn vận tốc khớp (rad/s)
+
+      # P-Controller gains (dùng trong solveIK_Position)
+      Kp_pos: 10.0                # Gain vị trí tuyến tính
+      Kp_rot: 5.0                 # Gain vị trí góc
+
+      # Cartesian velocity limits
+      max_lin_vel: 0.5            # Vận tốc tuyến tính tối đa (m/s)
+      max_rot_vel: 1.0            # Vận tốc góc tối đa (rad/s)

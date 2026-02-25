@@ -85,7 +85,7 @@ void KinematicsCore::internal_compute_jacobian(const JntArray& q, Jacobian& J) {
 }
 
 // --- INVERSE KINEMATICS (VELOCITY LEVEL) ---
-// Dùng Adaptive DLS để mượt mà
+// SVD Per-Axis Damping: chỉ damping hướng gần singularity, giữ nguyên hướng tốt
 bool KinematicsCore::solveIK_Velocity(const JntArray& q, const Vector6d& v_cart, JntArray& q_dot_out) {
     if (!initialized_ || q.size() != n_joints_) return false;
 
@@ -93,32 +93,66 @@ bool KinematicsCore::solveIK_Velocity(const JntArray& q, const Vector6d& v_cart,
     Jacobian J(6, n_joints_);
     internal_compute_jacobian(q, J);
 
-    // 2. Adaptive DLS (Damping động)
-    // Giúp chính xác khi ở xa điểm kỳ dị, và an toàn khi lại gần
-    Eigen::MatrixXd JJT = J * J.transpose();
-    double manipulability = std::sqrt(JJT.determinant()); // Độ đo khả năng vận động
-    
-    double lambda = 0.0;       // Mặc định không damping (Chính xác nhất)
-    double w_threshold = 0.02; // Ngưỡng bắt đầu kích hoạt bảo vệ
-    double lambda_max = 0.1;   // Damping tối đa
+    // 2. SVD phân rã: J = U * Σ * V^T
+    Eigen::JacobiSVD<Eigen::MatrixXd> svd(J, Eigen::ComputeThinU | Eigen::ComputeThinV);
+    const auto& S = svd.singularValues();  // σ₁ ≥ σ₂ ≥ ... ≥ σₙ
+    const auto& U = svd.matrixU();
+    const auto& V = svd.matrixV();
 
-    if (manipulability < w_threshold) {
-        double ratio = (1.0 - manipulability / w_threshold);
-        lambda = lambda_max * ratio * ratio; 
+    int rank = S.size();
+
+    // 3. Per-axis damped pseudo-inverse: q̇ = Σᵢ (σᵢ / (σᵢ² + λᵢ²)) * (uᵢᵀ · v_cart) * vᵢ
+    q_dot_out.resize(n_joints_);
+    q_dot_out.setZero();
+
+    for (int i = 0; i < rank; ++i) {
+        double sigma = S(i);
+        double lambda_i = 0.0;
+
+        // Quadratic ramp: hướng có σ nhỏ → λ tăng dần
+        if (sigma < ik_config_.sigma_threshold) {
+            double ratio = 1.0 - sigma / ik_config_.sigma_threshold;
+            lambda_i = ik_config_.lambda_max * ratio * ratio;
+        }
+
+        double factor = sigma / (sigma * sigma + lambda_i * lambda_i);
+        double alpha = U.col(i).dot(v_cart) * factor;
+        q_dot_out += alpha * V.col(i);
     }
 
-    // Giải phương trình: (J*J^T + lambda^2*I) * x = v
-    JJT.diagonal().array() += lambda * lambda;
-    q_dot_out = J.transpose() * JJT.ldlt().solve(v_cart);
-    
-    // Safety clamp (Giới hạn tốc độ khớp)
-    double max_speed = 3.0; 
-    for(int i=0; i<n_joints_; ++i) {
-        if(q_dot_out(i) > max_speed) q_dot_out(i) = max_speed;
-        if(q_dot_out(i) < -max_speed) q_dot_out(i) = -max_speed;
+    // 4. Direction Guard: hậu kiểm hướng thực tế so với mong muốn
+    double scale = computeDirectionGuardScale(J, v_cart, q_dot_out);
+    if (scale < 1.0) {
+        q_dot_out *= scale;
+    }
+
+    // 5. Safety clamp (Giới hạn tốc độ khớp)
+    for (unsigned int i = 0; i < n_joints_; ++i) {
+        q_dot_out(i) = std::clamp(q_dot_out(i), -ik_config_.max_joint_speed, ik_config_.max_joint_speed);
     }
 
     return true;
+}
+
+// --- DIRECTION GUARD ---
+// Kiểm tra cos(v_desired, J·q̇), nếu sai hướng → scale down
+double KinematicsCore::computeDirectionGuardScale(const Jacobian& J, const Vector6d& v_desired, const JntArray& q_dot) {
+    double v_norm = v_desired.norm();
+    if (v_norm < 1e-9) return 1.0;  // Không có lệnh → bỏ qua
+
+    Vector6d v_actual = J * q_dot;
+    double va_norm = v_actual.norm();
+    if (va_norm < 1e-9) return 1.0;
+
+    double cos_angle = v_desired.dot(v_actual) / (v_norm * va_norm);
+
+    if (cos_angle >= ik_config_.direction_cos_threshold) {
+        return 1.0;  // Hướng đúng → giữ nguyên
+    }
+
+    // Scale tuyến tính từ 1.0 xuống direction_min_scale khi cos giảm từ threshold xuống 0
+    double t = std::max(0.0, cos_angle) / ik_config_.direction_cos_threshold;
+    return ik_config_.direction_min_scale + (1.0 - ik_config_.direction_min_scale) * t;
 }
 
 // --- INVERSE KINEMATICS (POSITION LEVEL) ---
@@ -146,29 +180,27 @@ bool KinematicsCore::solveIK_Position(const JntArray& q_current, const Frame& ta
 
     // 3. P-Controller: Biến sai số thành Vận tốc mong muốn (V_cmd)
     // V_cmd = Kp * Error
-    // Tăng Kp lên cao để robot phản ứng mạnh với sai số
-    double Kp_pos = 10.0; 
-    double Kp_rot = 5.0;
-
     Vector6d v_cmd;
-    v_cmd.head(3) = p_err * Kp_pos;
-    v_cmd.tail(3) = w_err * Kp_rot;
+    v_cmd.head(3) = p_err * ik_config_.Kp_pos;
+    v_cmd.tail(3) = w_err * ik_config_.Kp_rot;
 
     // Kẹp vận tốc Cartesian tối đa (để không bị giật khi sai số lớn)
-    double max_lin_vel = 0.5; // 0.5 m/s
-    double max_rot_vel = 1.0; // 1.0 rad/s
-    
     double lin_norm = v_cmd.head(3).norm();
-    if (lin_norm > max_lin_vel) {
-        v_cmd.head(3) *= (max_lin_vel / lin_norm);
+    if (lin_norm > ik_config_.max_lin_vel) {
+        v_cmd.head(3) *= (ik_config_.max_lin_vel / lin_norm);
     }
     double rot_norm = v_cmd.tail(3).norm();
-    if (rot_norm > max_rot_vel) {
-        v_cmd.tail(3) *= (max_rot_vel / rot_norm);
+    if (rot_norm > ik_config_.max_rot_vel) {
+        v_cmd.tail(3) *= (ik_config_.max_rot_vel / rot_norm);
     }
 
     // 4. Giải bài toán vận tốc: q_dot = J_pinv * V_cmd
     // Sử dụng lại logic SVD Damping để đảm bảo mượt mà
     return solveIK_Velocity(q_current, v_cmd, q_dot_out);
 }
+
+// --- IK CONFIG ---
+void KinematicsCore::setIKConfig(const IKConfig& config) { ik_config_ = config; }
+const IKConfig& KinematicsCore::getIKConfig() const { return ik_config_; }
+
 } // namespace srk

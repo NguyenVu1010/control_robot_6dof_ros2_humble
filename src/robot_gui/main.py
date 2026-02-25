@@ -212,6 +212,9 @@ class RobotGUI(QMainWindow):
             else:
                 self.current_mode = MODE_IDLE
 
+            # 5.5. CẬP NHẬT BIỂU ĐỒ QUỸ ĐẠO
+            self.tabs.plot_tab.update_plot(self.last_fb_pose[:3])
+
             # 6. STATUS UI
             err = math.sqrt(sum((self.target_pos[i] - self.last_fb_pose[i])**2 for i in range(3)))
             if self.is_active:

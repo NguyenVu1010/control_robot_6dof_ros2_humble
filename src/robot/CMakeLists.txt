@@ -9,6 +9,7 @@ find_package(ament_cmake REQUIRED)
 
 # Install các thư mục tài nguyên
 install(DIRECTORY
+  config
   launch
   meshes
   urdf

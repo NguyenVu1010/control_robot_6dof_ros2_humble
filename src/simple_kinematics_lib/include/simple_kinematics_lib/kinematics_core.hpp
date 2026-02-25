@@ -2,6 +2,7 @@
 #define SKL_KINEMATICS_CORE_HPP_
 
 #include "chain.hpp"
+#include "ik_config.hpp"
 #include <memory>
 
 namespace srk {
@@ -29,11 +30,20 @@ public:
 
     unsigned int getNrOfJoints() const;
 
+    // Cấu hình IK (có thể set từ ROS parameter)
+    void setIKConfig(const IKConfig& config);
+    const IKConfig& getIKConfig() const;
+
 private:
     Chain chain_;
     unsigned int n_joints_;
     bool initialized_ = false;
+    IKConfig ik_config_;
+
     void internal_compute_jacobian(const JntArray& q, Jacobian& J);
+
+    // Hậu kiểm hướng: trả về scale [direction_min_scale, 1.0]
+    double computeDirectionGuardScale(const Jacobian& J, const Vector6d& v_desired, const JntArray& q_dot);
 };
 
 }

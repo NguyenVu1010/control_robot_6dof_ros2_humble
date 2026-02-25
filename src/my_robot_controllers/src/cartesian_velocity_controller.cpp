@@ -18,6 +18,17 @@ controller_interface::CallbackReturn CartesianVelocityController::on_init()
     auto_declare<std::string>("base_link", "base_link");
     auto_declare<std::string>("end_effector_link", "tool0");
     auto_declare<std::string>("robot_description", "");
+
+    // IK tuning parameters (có thể override từ ik_config.yaml)
+    auto_declare<double>("ik.sigma_threshold", 0.02);
+    auto_declare<double>("ik.lambda_max", 0.1);
+    auto_declare<double>("ik.direction_cos_threshold", 0.866);
+    auto_declare<double>("ik.direction_min_scale", 0.1);
+    auto_declare<double>("ik.max_joint_speed", 3.0);
+    auto_declare<double>("ik.Kp_pos", 3.0);
+    auto_declare<double>("ik.Kp_rot", 2.0);
+    auto_declare<double>("ik.max_lin_vel", 0.5);
+    auto_declare<double>("ik.max_rot_vel", 1.0);
   } catch (...) {
     return controller_interface::CallbackReturn::ERROR;
   }
@@ -41,6 +52,27 @@ controller_interface::CallbackReturn CartesianVelocityController::on_configure(
   kinematics_core_ = std::make_shared<srk::KinematicsCore>();
   if (!kinematics_core_->init(robot_desc, base_link_, end_effector_link_)) {
       return controller_interface::CallbackReturn::ERROR;
+  }
+
+  // 2b. Load IK Config từ ROS parameters
+  {
+    srk::IKConfig cfg;
+    cfg.sigma_threshold       = get_node()->get_parameter("ik.sigma_threshold").as_double();
+    cfg.lambda_max            = get_node()->get_parameter("ik.lambda_max").as_double();
+    cfg.direction_cos_threshold = get_node()->get_parameter("ik.direction_cos_threshold").as_double();
+    cfg.direction_min_scale   = get_node()->get_parameter("ik.direction_min_scale").as_double();
+    cfg.max_joint_speed       = get_node()->get_parameter("ik.max_joint_speed").as_double();
+    cfg.Kp_pos                = get_node()->get_parameter("ik.Kp_pos").as_double();
+    cfg.Kp_rot                = get_node()->get_parameter("ik.Kp_rot").as_double();
+    cfg.max_lin_vel           = get_node()->get_parameter("ik.max_lin_vel").as_double();
+    cfg.max_rot_vel           = get_node()->get_parameter("ik.max_rot_vel").as_double();
+    kinematics_core_->setIKConfig(cfg);
+
+    RCLCPP_INFO(get_node()->get_logger(),
+      "IK Config: sigma=%.3f lambda_max=%.3f cos_thresh=%.3f min_scale=%.2f max_jspd=%.1f Kp_pos=%.1f Kp_rot=%.1f max_lin=%.2f max_rot=%.2f",
+      cfg.sigma_threshold, cfg.lambda_max, cfg.direction_cos_threshold,
+      cfg.direction_min_scale, cfg.max_joint_speed, cfg.Kp_pos, cfg.Kp_rot,
+      cfg.max_lin_vel, cfg.max_rot_vel);
   }
 
   // 3. Init Trajectory Generator
