@@ -134,6 +134,51 @@ bool KinematicsCore::solveIK_Velocity(const JntArray& q, const Vector6d& v_cart,
     return true;
 }
 
+// --- INVERSE KINEMATICS (VELOCITY, POSITION ONLY - 3 DOF) ---
+// Chỉ bám vị trí XYZ, orientation tự do. Dùng 3 hàng đầu của Jacobian (J_lin: 3xN)
+// 6 khớp - 3 constraints = 3 DOF dư cho orientation tự do
+bool KinematicsCore::solveIK_VelocityPositionOnly(const JntArray& q, const Eigen::Vector3d& v_linear, JntArray& q_dot_out) {
+    if (!initialized_ || q.size() != n_joints_) return false;
+
+    // 1. Tính Jacobian đầy đủ 6xN rồi lấy 3 hàng đầu (linear)
+    Jacobian J_full(6, n_joints_);
+    internal_compute_jacobian(q, J_full);
+    Eigen::MatrixXd J_lin = J_full.topRows(3);  // 3 x N
+
+    // 2. SVD phân rã J_lin = U * Σ * V^T
+    Eigen::JacobiSVD<Eigen::MatrixXd> svd(J_lin, Eigen::ComputeThinU | Eigen::ComputeThinV);
+    const auto& S = svd.singularValues();
+    const auto& U = svd.matrixU();
+    const auto& V = svd.matrixV();
+
+    int rank = S.size();
+
+    // 3. Damped pseudo-inverse
+    q_dot_out.resize(n_joints_);
+    q_dot_out.setZero();
+
+    for (int i = 0; i < rank; ++i) {
+        double sigma = S(i);
+        double lambda_i = 0.0;
+
+        if (sigma < ik_config_.sigma_threshold) {
+            double ratio = 1.0 - sigma / ik_config_.sigma_threshold;
+            lambda_i = ik_config_.lambda_max * ratio * ratio;
+        }
+
+        double factor = sigma / (sigma * sigma + lambda_i * lambda_i);
+        double alpha = U.col(i).dot(v_linear) * factor;
+        q_dot_out += alpha * V.col(i);
+    }
+
+    // 4. Safety clamp
+    for (unsigned int i = 0; i < n_joints_; ++i) {
+        q_dot_out(i) = std::clamp(q_dot_out(i), -ik_config_.max_joint_speed, ik_config_.max_joint_speed);
+    }
+
+    return true;
+}
+
 // --- DIRECTION GUARD ---
 // Kiểm tra cos(v_desired, J·q̇), nếu sai hướng → scale down
 double KinematicsCore::computeDirectionGuardScale(const Jacobian& J, const Vector6d& v_desired, const JntArray& q_dot) {

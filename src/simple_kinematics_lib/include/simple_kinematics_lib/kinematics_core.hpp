@@ -20,9 +20,13 @@ public:
     // Input: q (góc khớp) -> Output: pose (XYZ RPY)
     bool solveFK(const JntArray& q, Frame& out_pose);
 
-    // Tính IK vận tốc (Differential IK)
+    // Tính IK vận tốc (Differential IK) - 6 DOF (position + orientation)
     // Input: q_current, v_cartesian -> Output: q_dot
     bool solveIK_Velocity(const JntArray& q, const Vector6d& v_cart, JntArray& q_dot_out);
+
+    // Tính IK vận tốc CHỈ vị trí (3 DOF) - orientation tự do
+    // Dùng cho circle/line tracking khi không cần giữ hướng EE
+    bool solveIK_VelocityPositionOnly(const JntArray& q, const Eigen::Vector3d& v_linear, JntArray& q_dot_out);
 
     // Tính toán vận tốc khớp cần thiết để đến đích (P-Controller tích hợp)
     // Input: q_current, target_pose, dt -> Output: q_dot

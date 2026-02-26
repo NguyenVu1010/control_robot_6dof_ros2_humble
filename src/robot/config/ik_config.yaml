@@ -13,7 +13,7 @@ my_cartesian_controller:
       direction_min_scale: 0.1        # Scale tối thiểu khi sai hướng
 
       # Safety
-      max_joint_speed: 3.0        # Giới hạn vận tốc khớp (rad/s)
+      max_joint_speed: 1.5        # Giới hạn vận tốc khớp (rad/s) - khớp với safety clamp trong controller
 
       # P-Controller gains (dùng trong solveIK_Position)
       Kp_pos: 10.0                # Gain vị trí tuyến tính

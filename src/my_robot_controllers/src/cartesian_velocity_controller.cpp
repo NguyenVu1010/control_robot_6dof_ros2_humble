@@ -24,7 +24,7 @@ controller_interface::CallbackReturn CartesianVelocityController::on_init()
     auto_declare<double>("ik.lambda_max", 0.1);
     auto_declare<double>("ik.direction_cos_threshold", 0.866);
     auto_declare<double>("ik.direction_min_scale", 0.1);
-    auto_declare<double>("ik.max_joint_speed", 3.0);
+    auto_declare<double>("ik.max_joint_speed", 1.5);
     auto_declare<double>("ik.Kp_pos", 3.0);
     auto_declare<double>("ik.Kp_rot", 2.0);
     auto_declare<double>("ik.max_lin_vel", 0.5);
@@ -231,19 +231,28 @@ controller_interface::return_type CartesianVelocityController::update(
                       v_target.tail(3) = v_ff.tail(3) + (aa_err.axis() * aa_err.angle() * Kp);
                       kinematics_core_->solveIK_Velocity(q_current_, v_target, q_dot_cmd_);
                       
-                      // Cập nhật target_pos liên tục để khi dừng lại robot đứng yên tại chỗ đó
-                      shm_data->target_pos[0] = current_pose.translation().x();
-                      shm_data->target_pos[1] = current_pose.translation().y();
-                      shm_data->target_pos[2] = current_pose.translation().z();
+                      // Cập nhật target_pos = vị trí mục tiêu trên quỹ đạo (không phải vị trí thực)
+                      // Khi trajectory kết thúc, HOLD sẽ giữ đúng vị trí đích thay vì vị trí sai lệch
+                      shm_data->target_pos[0] = target_step.translation().x();
+                      shm_data->target_pos[1] = target_step.translation().y();
+                      shm_data->target_pos[2] = target_step.translation().z();
                   }
               } 
               else if (v_jog.norm() > 1e-6) {
-                  // Đang nhấn nút Jogging trên GUI
-                  kinematics_core_->solveIK_Velocity(q_current_, v_jog, q_dot_cmd_);
-                  // Sync target để khi nhả nút Jog robot sẽ "Hold" tại vị trí mới
-                  shm_data->target_pos[0] = current_pose.translation().x();
-                  shm_data->target_pos[1] = current_pose.translation().y();
-                  shm_data->target_pos[2] = current_pose.translation().z();
+                  // Velocity jogging (circle/line test)
+                  // v_jog = feedforward velocity từ GUI (30Hz), chỉ có phần linear [vx,vy,vz,0,0,0]
+                  // target_pos = vị trí mục tiêu lý tưởng từ GUI (30Hz)
+                  // Position feedback TẠI 500Hz, CHỈ BÁM XYZ - orientation tự do
+                  Eigen::Vector3d target_p;
+                  target_p << shm_data->target_pos[0], shm_data->target_pos[1], shm_data->target_pos[2];
+                  Eigen::Vector3d p_err = target_p - current_pose.translation();
+
+                  double Kp_track = 10.0;
+                  Eigen::Vector3d v_lin;
+                  v_lin = v_jog.head(3) + p_err * Kp_track;
+
+                  // IK chỉ dùng 3 hàng linear của Jacobian → orientation tự do
+                  kinematics_core_->solveIK_VelocityPositionOnly(q_current_, v_lin, q_dot_cmd_);
               }
               else {
                   // Chế độ HOLD: Giữ vị trí hiện tại

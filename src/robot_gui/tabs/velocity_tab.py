@@ -106,16 +106,56 @@ class VelocityTab(QWidget):
 
     def get_current_vel(self):
         """
-        Tính toán vận tốc dựa trên Tâm, Mặt phẳng và Thông số cài đặt
+        Trả về CHỈ feedforward velocity (không có position feedback).
+        Position feedback sẽ được thực hiện ở Controller C++ tại 500Hz
+        thay vì ở GUI 30Hz để giảm sai lệch bám đường.
         """
         if not self.test_mode:
             return [0.0]*6
 
         t = time.time() - self.start_t
-        fb_pose = self.main_win.last_fb_pose # [x, y, z, r, p, y]
-        Kp = 5.0 # Hệ số bù sai số vị trí để robot không bị trôi khỏi quỹ đạo
 
         # --- CHẾ ĐỘ ĐƯỜNG TRÒN ---
+        if self.test_mode == 'circle':
+            r = self.spin_circle_r.value()
+            w = self.spin_circle_w.value()
+            plane = self.combo_plane.currentText()
+
+            # Chỉ trả về vận tốc tiếp tuyến (Feedforward) - KHÔNG có Kp feedback
+            if plane == "XY Plane":
+                vx_ff = -r * w * math.sin(w * t)
+                vy_ff =  r * w * math.cos(w * t)
+                return [vx_ff, vy_ff, 0.0, 0.0, 0.0, 0.0]
+            elif plane == "YZ Plane":
+                vy_ff = -r * w * math.sin(w * t)
+                vz_ff =  r * w * math.cos(w * t)
+                return [0.0, vy_ff, vz_ff, 0.0, 0.0, 0.0]
+            else:  # XZ Plane
+                vx_ff = -r * w * math.sin(w * t)
+                vz_ff =  r * w * math.cos(w * t)
+                return [vx_ff, 0.0, vz_ff, 0.0, 0.0, 0.0]
+
+        # --- CHẾ ĐỘ ĐƯỜNG THẲNG ---
+        if self.test_mode == 'line':
+            speed = self.spin_line_speed.value()
+            axis = self.combo_axis.currentText()
+
+            # Chỉ feedforward: speed * cos(t)
+            v_ff = speed * math.cos(t)
+
+            if axis == "X Axis": return [v_ff, 0, 0, 0, 0, 0]
+            if axis == "Y Axis": return [0, v_ff, 0, 0, 0, 0]
+            return [0, 0, v_ff, 0, 0, 0]
+
+        return [0.0]*6
+
+    def get_target_pos(self):
+        """Trả về vị trí mục tiêu lý tưởng trên quỹ đạo (để vẽ đường target)"""
+        if not self.test_mode:
+            return None
+
+        t = time.time() - self.start_t
+
         if self.test_mode == 'circle':
             r = self.spin_circle_r.value()
             w = self.spin_circle_w.value()
@@ -124,47 +164,23 @@ class VelocityTab(QWidget):
             cz = self.spin_center_z.value()
             plane = self.combo_plane.currentText()
 
-            # Tính vị trí mong muốn (P_target) và vận tốc tiếp tuyến (V_ff)
             if plane == "XY Plane":
-                # Vị trí mục tiêu trên đường tròn
-                target_x = cx + r * math.cos(w * t)
-                target_y = cy + r * math.sin(w * t)
-                target_z = cz
-                # Vận tốc tiếp tuyến (Feedforward)
-                vx_ff = -r * w * math.sin(w * t)
-                vy_ff =  r * w * math.cos(w * t)
-                vz_ff = 0.0
+                return [cx + r * math.cos(w * t), cy + r * math.sin(w * t), cz]
             elif plane == "YZ Plane":
-                target_x = cx
-                target_y = cy + r * math.cos(w * t)
-                target_z = cz + r * math.sin(w * t)
-                vx_ff = 0.0
-                vy_ff = -r * w * math.sin(w * t)
-                vz_ff =  r * w * math.cos(w * t)
-            else: # XZ Plane
-                target_x = cx + r * math.cos(w * t)
-                target_y = cy
-                target_z = cz + r * math.sin(w * t)
-                vx_ff = -r * w * math.sin(w * t)
-                vy_ff = 0.0
-                vz_ff =  r * w * math.cos(w * t)
+                return [cx, cy + r * math.cos(w * t), cz + r * math.sin(w * t)]
+            else:  # XZ Plane
+                return [cx + r * math.cos(w * t), cy, cz + r * math.sin(w * t)]
 
-            # Tính toán vận tốc cuối cùng = V_tiếp_tuyến + Kp * (Vị_trí_mục_tiêu - Vị_trí_hiện_tại)
-            vx = vx_ff + Kp * (target_x - fb_pose[0])
-            vy = vy_ff + Kp * (target_y - fb_pose[1])
-            vz = vz_ff + Kp * (target_z - fb_pose[2])
-            return [vx, vy, vz, 0.0, 0.0, 0.0]
-
-        # --- CHẾ ĐỘ ĐƯỜNG THẲNG ---
         if self.test_mode == 'line':
             speed = self.spin_line_speed.value()
             axis = self.combo_axis.currentText()
-            
-            # Tính hướng đi (đi tới đi lui theo hàm sin để không chạy mất tích)
-            move = speed * math.cos(t) 
-            
-            if axis == "X Axis": return [move, 0, 0, 0, 0, 0]
-            if axis == "Y Axis": return [0, move, 0, 0, 0, 0]
-            return [0, 0, move, 0, 0, 0]
+            cx = self.spin_center_x.value()
+            cy = self.spin_center_y.value()
+            cz = self.spin_center_z.value()
+            displacement = speed * math.sin(t)
 
-        return [0.0]*6
+            if axis == "X Axis": return [cx + displacement, cy, cz]
+            if axis == "Y Axis": return [cx, cy + displacement, cz]
+            return [cx, cy, cz + displacement]
+
+        return None

@@ -21,10 +21,15 @@ class PlotTab(QWidget):
         self.main_win = main_win
         self.is_recording = False
 
-        # Dữ liệu quỹ đạo
+        # Dữ liệu quỹ đạo thực tế (actual)
         self.data_x = deque(maxlen=self.MAX_POINTS)
         self.data_y = deque(maxlen=self.MAX_POINTS)
         self.data_z = deque(maxlen=self.MAX_POINTS)
+
+        # Dữ liệu quỹ đạo mục tiêu (target)
+        self.target_x = deque(maxlen=self.MAX_POINTS)
+        self.target_y = deque(maxlen=self.MAX_POINTS)
+        self.target_z = deque(maxlen=self.MAX_POINTS)
 
         layout = QVBoxLayout(self)
 
@@ -121,6 +126,10 @@ class PlotTab(QWidget):
         self.data_x = deque(old_x, maxlen=val)
         self.data_y = deque(old_y, maxlen=val)
         self.data_z = deque(old_z, maxlen=val)
+        old_tx, old_ty, old_tz = list(self.target_x), list(self.target_y), list(self.target_z)
+        self.target_x = deque(old_tx, maxlen=val)
+        self.target_y = deque(old_ty, maxlen=val)
+        self.target_z = deque(old_tz, maxlen=val)
 
     def toggle_record(self, checked):
         self.is_recording = checked
@@ -135,12 +144,16 @@ class PlotTab(QWidget):
         self.data_x.clear()
         self.data_y.clear()
         self.data_z.clear()
+        self.target_x.clear()
+        self.target_y.clear()
+        self.target_z.clear()
         self._create_axes()
 
-    def update_plot(self, ee_pos):
+    def update_plot(self, ee_pos, target_pos=None):
         """
         Được gọi từ vòng lặp chính (30Hz).
-        ee_pos: tuple/list (x, y, z) tọa độ điểm cuối
+        ee_pos: tuple/list (x, y, z) tọa độ điểm cuối thực tế
+        target_pos: tuple/list (x, y, z) tọa độ mục tiêu lý tưởng (hoặc None)
         """
         x, y, z = ee_pos
 
@@ -149,9 +162,17 @@ class PlotTab(QWidget):
             self.data_x.append(x)
             self.data_y.append(y)
             self.data_z.append(z)
+            if target_pos:
+                self.target_x.append(target_pos[0])
+                self.target_y.append(target_pos[1])
+                self.target_z.append(target_pos[2])
 
         # Cập nhật thông tin
-        self.lbl_info.setText(f"Điểm: {len(self.data_x)} | Vị trí: X={x:.3f}  Y={y:.3f}  Z={z:.3f}")
+        err_str = ""
+        if target_pos:
+            err = math.sqrt(sum((target_pos[i] - ee_pos[i])**2 for i in range(3)))
+            err_str = f" | Err={err*1000:.1f}mm"
+        self.lbl_info.setText(f"Điểm: {len(self.data_x)} | Vị trí: X={x:.3f}  Y={y:.3f}  Z={z:.3f}{err_str}")
 
         # Chỉ vẽ lại khi tab đang hiển thị (tiết kiệm CPU)
         if not self.isVisible():
@@ -187,22 +208,40 @@ class PlotTab(QWidget):
         self.ax.set_title(f"Quỹ đạo End-Effector ({self.current_mode})",
                           color='white', fontsize=11, fontweight='bold')
 
-        # Vẽ quỹ đạo đã ghi
+        # Vẽ quỹ đạo mục tiêu (target - nét đứt cam)
+        has_target = len(self.target_x) > 1
+        if has_target:
+            tx = list(self.target_x)
+            ty = list(self.target_y)
+            tz = list(self.target_z)
+
+            if self.current_mode == "3D":
+                self.ax.plot3D(tx, ty, tz, color='#FF7043', linewidth=1.5, linestyle='--', alpha=0.9, label='Target')
+            else:
+                td1, td2 = self._get_2d_data(tx, ty, tz)
+                self.ax.plot(td1, td2, color='#FF7043', linewidth=1.5, linestyle='--', alpha=0.9, label='Target')
+
+        # Vẽ quỹ đạo thực tế (actual - xanh dương)
         if len(self.data_x) > 1:
             lx = list(self.data_x)
             ly = list(self.data_y)
             lz = list(self.data_z)
 
             if self.current_mode == "3D":
-                self.ax.plot3D(lx, ly, lz, color='#42A5F5', linewidth=1.2, alpha=0.8)
+                self.ax.plot3D(lx, ly, lz, color='#42A5F5', linewidth=1.2, alpha=0.8, label='Actual')
                 # Điểm đầu (xanh lá) và điểm cuối (đỏ)
                 self.ax.scatter(*[[lx[0]], [ly[0]], [lz[0]]], color='#66BB6A', s=40, zorder=5)
                 self.ax.scatter(*[[lx[-1]], [ly[-1]], [lz[-1]]], color='#EF5350', s=40, zorder=5)
             else:
                 d1, d2 = self._get_2d_data(lx, ly, lz)
-                self.ax.plot(d1, d2, color='#42A5F5', linewidth=1.2, alpha=0.8)
+                self.ax.plot(d1, d2, color='#42A5F5', linewidth=1.2, alpha=0.8, label='Actual')
                 self.ax.plot(d1[0], d2[0], 'o', color='#66BB6A', markersize=7, zorder=5)
                 self.ax.plot(d1[-1], d2[-1], 'o', color='#EF5350', markersize=7, zorder=5)
+
+        # Legend (chỉ hiện khi có cả 2 đường)
+        if has_target and len(self.data_x) > 1:
+            self.ax.legend(loc='upper right', fontsize=8, facecolor='#333333',
+                          edgecolor='gray', labelcolor='white')
 
         # Vẽ vị trí hiện tại (vàng)
         if current_pos:
@@ -215,8 +254,25 @@ class PlotTab(QWidget):
                 self.ax.plot(p1, p2, 'D', color='#FFD740', markersize=8,
                              zorder=10, markeredgecolor='white', markeredgewidth=0.5)
 
-        # Đặt tỉ lệ trục bằng nhau
-        if self.current_mode != "3D":
+        # Đặt tỉ lệ trục 1:1 (1:1:1 cho 3D)
+        if self.current_mode == "3D":
+            # Thu thập tất cả dữ liệu để tính range
+            all_x, all_y, all_z = [], [], []
+            if len(self.data_x) > 0:
+                all_x += list(self.data_x); all_y += list(self.data_y); all_z += list(self.data_z)
+            if len(self.target_x) > 0:
+                all_x += list(self.target_x); all_y += list(self.target_y); all_z += list(self.target_z)
+            if current_pos:
+                all_x.append(current_pos[0]); all_y.append(current_pos[1]); all_z.append(current_pos[2])
+            if all_x:
+                mid_x = (max(all_x) + min(all_x)) / 2
+                mid_y = (max(all_y) + min(all_y)) / 2
+                mid_z = (max(all_z) + min(all_z)) / 2
+                max_range = max(max(all_x)-min(all_x), max(all_y)-min(all_y), max(all_z)-min(all_z), 0.01) / 2
+                self.ax.set_xlim(mid_x - max_range, mid_x + max_range)
+                self.ax.set_ylim(mid_y - max_range, mid_y + max_range)
+                self.ax.set_zlim(mid_z - max_range, mid_z + max_range)
+        else:
             self.ax.set_aspect('equal', adjustable='datalim')
 
         self.figure.tight_layout()

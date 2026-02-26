@@ -146,21 +146,25 @@ class RobotGUI(QMainWindow):
                 self.tabs.pose_tab.update_ui_values(self.target_pos, self.target_rpy)
                 self.is_initialized = True
 
-            # 2. LẤY VẬN TỐC EE TỪ TAB (Dạng phẳng 6 số)
-            current_ee_vel = self.tabs.vel_tab.get_current_vel()
-            
-            # 3. KIỂM TRA TRẠNG THÁI JOGGING
-            # Gộp manual_vel (joint) và ee_vel để kiểm tra xem có bất kỳ chuyển động tay nào không
-            combined_vels = self.manual_vel + current_ee_vel
-            is_jogging = any(abs(v) > 1e-6 for v in combined_vels)
+            # 2. LẤY VẬN TỐC EE VÀ VỊ TRÍ MỤC TIÊU TỪ TAB
+            current_ee_vel = self.tabs.vel_tab.get_current_vel()  # Feedforward only
+            vel_target_pos = self.tabs.vel_tab.get_target_pos()   # Vị trí mục tiêu toán học
 
-            # 4. FIX TARGET BÁM THEO ROBOT (Jog Follow)
-            # Khi đang Jog, Robot di chuyển -> Cập nhật liên tục Target = Vị trí hiện tại
-            # Để khi dừng (nhả nút), robot đứng yên tại chỗ, không bị kéo về tọa độ cũ.
-            if is_jogging:
+            # 3. KIỂM TRA TRẠNG THÁI JOGGING
+            is_manual_jogging = any(abs(v) > 1e-6 for v in self.manual_vel)
+            is_vel_test = vel_target_pos is not None  # Circle/Line test đang chạy
+            is_jogging = is_manual_jogging or is_vel_test
+
+            # 4. QUẢN LÝ TARGET POSITION
+            if is_vel_test:
+                # Circle/Line test: Ghi vị trí mục tiêu toán học vào target_pos
+                # Controller C++ sẽ dùng target_pos này để feedback tại 500Hz
+                self.target_pos = list(vel_target_pos)
+                self.target_rpy = self.last_fb_pose[3:]  # Giữ orientation theo actual
+            elif is_manual_jogging:
+                # Manual jog: Sync target = actual để khi nhả nút robot đứng yên
                 self.target_pos = self.last_fb_pose[:3]
                 self.target_rpy = self.last_fb_pose[3:]
-                # Đồng bộ UI liên tục để người dùng thấy tọa độ nhảy theo robot
                 self.tabs.pose_tab.update_ui_values(self.target_pos, self.target_rpy)
 
             # Đồng bộ UI khi Standby hoặc vừa thả nút Jogging
@@ -213,7 +217,9 @@ class RobotGUI(QMainWindow):
                 self.current_mode = MODE_IDLE
 
             # 5.5. CẬP NHẬT BIỂU ĐỒ QUỸ ĐẠO
-            self.tabs.plot_tab.update_plot(self.last_fb_pose[:3])
+            # Lấy vị trí mục tiêu từ VelocityTab (circle/line test) để vẽ so sánh
+            target_plot = self.tabs.vel_tab.get_target_pos()
+            self.tabs.plot_tab.update_plot(self.last_fb_pose[:3], target_pos=target_plot)
 
             # 6. STATUS UI
             err = math.sqrt(sum((self.target_pos[i] - self.last_fb_pose[i])**2 for i in range(3)))
