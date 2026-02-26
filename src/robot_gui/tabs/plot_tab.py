@@ -10,6 +10,7 @@ from PyQt6.QtCore import Qt
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
+import matplotlib.gridspec as gridspec
 
 
 class PlotTab(QWidget):
@@ -30,6 +31,12 @@ class PlotTab(QWidget):
         self.target_x = deque(maxlen=self.MAX_POINTS)
         self.target_y = deque(maxlen=self.MAX_POINTS)
         self.target_z = deque(maxlen=self.MAX_POINTS)
+
+        # Dữ liệu sai lệch (error)
+        self.err_total = deque(maxlen=self.MAX_POINTS)  # Euclidean distance (mm)
+        self.err_x = deque(maxlen=self.MAX_POINTS)      # eX (mm)
+        self.err_y = deque(maxlen=self.MAX_POINTS)      # eY (mm)
+        self.err_z = deque(maxlen=self.MAX_POINTS)      # eZ (mm)
 
         layout = QVBoxLayout(self)
 
@@ -74,7 +81,7 @@ class PlotTab(QWidget):
         # --- BIỂU ĐỒ MATPLOTLIB ---
         self.figure = Figure(facecolor='#2b2b2b')
         self.canvas = FigureCanvas(self.figure)
-        self.canvas.setMinimumHeight(300)
+        self.canvas.setMinimumHeight(400)
         layout.addWidget(self.canvas, 1)
 
         # Thông tin điểm hiện tại
@@ -87,16 +94,21 @@ class PlotTab(QWidget):
         self._create_axes()
 
     def _create_axes(self):
-        """Tạo lại axes theo chế độ hiển thị"""
+        """Tạo lại axes theo chế độ hiển thị: trajectory trên, error dưới"""
         self.figure.clear()
+
+        # Dùng GridSpec: trajectory chiếm 65%, error chiếm 35%
+        gs = gridspec.GridSpec(2, 1, height_ratios=[65, 35], hspace=0.35)
+
+        # --- Subplot trên: Quỹ đạo ---
         if self.current_mode == "3D":
-            self.ax = self.figure.add_subplot(111, projection='3d', facecolor='#1e1e1e')
+            self.ax = self.figure.add_subplot(gs[0], projection='3d', facecolor='#1e1e1e')
             self.ax.set_xlabel('X (m)', color='white', fontsize=9)
             self.ax.set_ylabel('Y (m)', color='white', fontsize=9)
             self.ax.set_zlabel('Z (m)', color='white', fontsize=9)
             self.ax.tick_params(colors='white', labelsize=7)
         else:
-            self.ax = self.figure.add_subplot(111, facecolor='#1e1e1e')
+            self.ax = self.figure.add_subplot(gs[0], facecolor='#1e1e1e')
             if self.current_mode == "XY":
                 self.ax.set_xlabel('X (m)', color='white', fontsize=9)
                 self.ax.set_ylabel('Y (m)', color='white', fontsize=9)
@@ -111,6 +123,15 @@ class PlotTab(QWidget):
 
         self.ax.set_title(f"Quỹ đạo End-Effector ({self.current_mode})",
                           color='white', fontsize=11, fontweight='bold')
+
+        # --- Subplot dưới: Sai lệch ---
+        self.ax_err = self.figure.add_subplot(gs[1], facecolor='#1e1e1e')
+        self.ax_err.set_xlabel('Mẫu', color='white', fontsize=9)
+        self.ax_err.set_ylabel('Sai lệch (mm)', color='white', fontsize=9)
+        self.ax_err.set_title("Sai lệch bám quỹ đạo", color='white', fontsize=10, fontweight='bold')
+        self.ax_err.tick_params(colors='white', labelsize=8)
+        self.ax_err.grid(True, alpha=0.3, color='gray')
+
         self.figure.tight_layout()
         self.canvas.draw()
 
@@ -130,6 +151,11 @@ class PlotTab(QWidget):
         self.target_x = deque(old_tx, maxlen=val)
         self.target_y = deque(old_ty, maxlen=val)
         self.target_z = deque(old_tz, maxlen=val)
+        old_et, old_ex, old_ey, old_ez = list(self.err_total), list(self.err_x), list(self.err_y), list(self.err_z)
+        self.err_total = deque(old_et, maxlen=val)
+        self.err_x = deque(old_ex, maxlen=val)
+        self.err_y = deque(old_ey, maxlen=val)
+        self.err_z = deque(old_ez, maxlen=val)
 
     def toggle_record(self, checked):
         self.is_recording = checked
@@ -147,6 +173,10 @@ class PlotTab(QWidget):
         self.target_x.clear()
         self.target_y.clear()
         self.target_z.clear()
+        self.err_total.clear()
+        self.err_x.clear()
+        self.err_y.clear()
+        self.err_z.clear()
         self._create_axes()
 
     def update_plot(self, ee_pos, target_pos=None):
@@ -166,6 +196,15 @@ class PlotTab(QWidget):
                 self.target_x.append(target_pos[0])
                 self.target_y.append(target_pos[1])
                 self.target_z.append(target_pos[2])
+                # Tính và lưu sai lệch
+                ex = (target_pos[0] - x) * 1000  # mm
+                ey = (target_pos[1] - y) * 1000
+                ez = (target_pos[2] - z) * 1000
+                et = math.sqrt(ex**2 + ey**2 + ez**2)
+                self.err_x.append(ex)
+                self.err_y.append(ey)
+                self.err_z.append(ez)
+                self.err_total.append(et)
 
         # Cập nhật thông tin
         err_str = ""
@@ -184,7 +223,7 @@ class PlotTab(QWidget):
         """Vẽ lại toàn bộ biểu đồ"""
         self.ax.clear()
 
-        # Cấu hình lại axes
+        # Cấu hình lại axes trajectory
         if self.current_mode == "3D":
             self.ax.set_xlabel('X (m)', color='white', fontsize=9)
             self.ax.set_ylabel('Y (m)', color='white', fontsize=9)
@@ -274,6 +313,45 @@ class PlotTab(QWidget):
                 self.ax.set_zlim(mid_z - max_range, mid_z + max_range)
         else:
             self.ax.set_aspect('equal', adjustable='datalim')
+
+        # --- VẼ ĐỒ THỊ SAI LỆCH (subplot dưới) ---
+        self.ax_err.clear()
+        self.ax_err.set_facecolor('#1e1e1e')
+        self.ax_err.set_xlabel('Mẫu', color='white', fontsize=9)
+        self.ax_err.set_ylabel('Sai lệch (mm)', color='white', fontsize=9)
+        self.ax_err.tick_params(colors='white', labelsize=8)
+        self.ax_err.grid(True, alpha=0.3, color='gray')
+
+        if len(self.err_total) > 1:
+            samples = list(range(len(self.err_total)))
+            et = list(self.err_total)
+            ex = list(self.err_x)
+            ey = list(self.err_y)
+            ez = list(self.err_z)
+
+            # Vẽ sai lệch từng trục (mờ hơn)
+            self.ax_err.plot(samples, ex, color='#EF5350', linewidth=0.8, alpha=0.6, label='eX')
+            self.ax_err.plot(samples, ey, color='#66BB6A', linewidth=0.8, alpha=0.6, label='eY')
+            self.ax_err.plot(samples, ez, color='#42A5F5', linewidth=0.8, alpha=0.6, label='eZ')
+            # Vẽ sai lệch tổng (đậm, nổi bật)
+            self.ax_err.plot(samples, et, color='#FFD740', linewidth=1.5, alpha=0.95, label='Total')
+
+            # Tính thống kê
+            mean_err = sum(et) / len(et)
+            max_err = max(et)
+            rms_err = math.sqrt(sum(e**2 for e in et) / len(et))
+
+            # Đường trung bình (nét đứt trắng)
+            self.ax_err.axhline(y=mean_err, color='white', linewidth=0.8, linestyle='--', alpha=0.5)
+
+            title_str = f"Sai lệch  |  Mean={mean_err:.1f}mm  Max={max_err:.1f}mm  RMS={rms_err:.1f}mm"
+            self.ax_err.set_title(title_str, color='white', fontsize=9, fontweight='bold')
+
+            self.ax_err.legend(loc='upper right', fontsize=7, facecolor='#333333',
+                              edgecolor='gray', labelcolor='white', ncol=4)
+        else:
+            self.ax_err.set_title("Sai lệch bám quỹ đạo (chưa có dữ liệu)",
+                                  color='#666666', fontsize=9)
 
         self.figure.tight_layout()
         self.canvas.draw_idle()
