@@ -59,6 +59,15 @@ class PlotTab(QWidget):
         self.spin_max.valueChanged.connect(self.on_max_changed)
         ctrl_layout.addWidget(self.spin_max)
 
+        # Số điểm đuôi actual hiển thị (0 = tất cả)
+        ctrl_layout.addWidget(QLabel("Đuôi:"))
+        self.spin_tail = QSpinBox()
+        self.spin_tail.setRange(0, 5000)
+        self.spin_tail.setValue(150)  # ~5 giây ở 30Hz
+        self.spin_tail.setSingleStep(50)
+        self.spin_tail.setSpecialValueText("Tất cả")
+        ctrl_layout.addWidget(self.spin_tail)
+
         ctrl_layout.addStretch()
 
         # Nút ghi / dừng
@@ -247,35 +256,42 @@ class PlotTab(QWidget):
         self.ax.set_title(f"Quỹ đạo End-Effector ({self.current_mode})",
                           color='white', fontsize=11, fontweight='bold')
 
-        # Vẽ quỹ đạo mục tiêu (target - nét đứt cam)
+        # Vẽ quỹ đạo thực tế (actual - xanh dương, chỉ vẽ đuôi N điểm)
         has_target = len(self.target_x) > 1
+        if len(self.data_x) > 1:
+            lx = list(self.data_x)
+            ly = list(self.data_y)
+            lz = list(self.data_z)
+
+            # Cắt chỉ lấy N điểm cuối (tail), 0 = vẽ tất cả
+            tail = self.spin_tail.value()
+            if tail > 0 and len(lx) > tail:
+                lx = lx[-tail:]
+                ly = ly[-tail:]
+                lz = lz[-tail:]
+
+            if self.current_mode == "3D":
+                self.ax.plot3D(lx, ly, lz, color='#42A5F5', linewidth=1.2, alpha=0.8, zorder=2, label='Actual')
+                # Điểm đầu đuôi (xanh lá) và điểm cuối (đỏ)
+                self.ax.scatter(*[[lx[0]], [ly[0]], [lz[0]]], color='#66BB6A', s=40, zorder=5)
+                self.ax.scatter(*[[lx[-1]], [ly[-1]], [lz[-1]]], color='#EF5350', s=40, zorder=5)
+            else:
+                d1, d2 = self._get_2d_data(lx, ly, lz)
+                self.ax.plot(d1, d2, color='#42A5F5', linewidth=1.2, alpha=0.8, zorder=2, label='Actual')
+                self.ax.plot(d1[0], d2[0], 'o', color='#66BB6A', markersize=7, zorder=5)
+                self.ax.plot(d1[-1], d2[-1], 'o', color='#EF5350', markersize=7, zorder=5)
+
+        # Vẽ quỹ đạo mục tiêu (target - nét đứt cam, vẽ đầy đủ, ở trên)
         if has_target:
             tx = list(self.target_x)
             ty = list(self.target_y)
             tz = list(self.target_z)
 
             if self.current_mode == "3D":
-                self.ax.plot3D(tx, ty, tz, color='#FF7043', linewidth=1.5, linestyle='--', alpha=0.9, label='Target')
+                self.ax.plot3D(tx, ty, tz, color='#FF7043', linewidth=1.8, linestyle='--', alpha=0.95, zorder=3, label='Target')
             else:
                 td1, td2 = self._get_2d_data(tx, ty, tz)
-                self.ax.plot(td1, td2, color='#FF7043', linewidth=1.5, linestyle='--', alpha=0.9, label='Target')
-
-        # Vẽ quỹ đạo thực tế (actual - xanh dương)
-        if len(self.data_x) > 1:
-            lx = list(self.data_x)
-            ly = list(self.data_y)
-            lz = list(self.data_z)
-
-            if self.current_mode == "3D":
-                self.ax.plot3D(lx, ly, lz, color='#42A5F5', linewidth=1.2, alpha=0.8, label='Actual')
-                # Điểm đầu (xanh lá) và điểm cuối (đỏ)
-                self.ax.scatter(*[[lx[0]], [ly[0]], [lz[0]]], color='#66BB6A', s=40, zorder=5)
-                self.ax.scatter(*[[lx[-1]], [ly[-1]], [lz[-1]]], color='#EF5350', s=40, zorder=5)
-            else:
-                d1, d2 = self._get_2d_data(lx, ly, lz)
-                self.ax.plot(d1, d2, color='#42A5F5', linewidth=1.2, alpha=0.8, label='Actual')
-                self.ax.plot(d1[0], d2[0], 'o', color='#66BB6A', markersize=7, zorder=5)
-                self.ax.plot(d1[-1], d2[-1], 'o', color='#EF5350', markersize=7, zorder=5)
+                self.ax.plot(td1, td2, color='#FF7043', linewidth=1.8, linestyle='--', alpha=0.95, zorder=3, label='Target')
 
         # Legend (chỉ hiện khi có cả 2 đường)
         if has_target and len(self.data_x) > 1:
